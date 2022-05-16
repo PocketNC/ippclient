@@ -53,7 +53,7 @@ class Client:
   def __init__(self, host=HOST, port=PORT):
     self.host = host
     self.port = port
-    self.tcpClient = TCPClient(self.host, self.port)
+    self.tcpClient = TCPClient()
     self.stream = None
     self.nextTag = 1
     self.nextEventTag = 1
@@ -64,8 +64,10 @@ class Client:
   async def connect(self):
     try:
       self.stream = await self.tcpClient.connect(self.host, self.port)
+      return True
     except Exception as e:
       logger.error("connect error: %s", e)
+      return False
 
   async def disconnect(self):
     try:
@@ -107,8 +109,9 @@ class Client:
       logger.error(e)
 
   async def handleMessage(self):
-    msg = self.stream.read_until(b"\r\n").decode("ascii")
-    logger.debug("recv: %s", msg)
+    msg = await self.stream.read_until(b"\r\n")
+    msg = msg.decode("ascii")
+    logger.debug("Rcv msg: %s", msg)
     return msg
 
   async def sendAndWait(self, command):
@@ -116,7 +119,7 @@ class Client:
     while True:
       msg = await self.handleMessage()
       if ("%s %%" % (tag)) in msg:
-        print("Transaction Complete")
+        logger.debug("Transaction Complete")
         break
 
   async def eventSendAndWait(self, command):
@@ -124,7 +127,7 @@ class Client:
     while True:
       msg = await self.handleMessage()
       if ("%s %%" % (tag)) in msg:
-        print("Transaction Complete")
+        logger.debug("Transaction Complete")
         break
 
   async def commandSequence(self, cmdArr ):
@@ -137,7 +140,7 @@ class Client:
   '''
   async def startSession(self):
     await self.sendCommand("EndSession()")
-    return awaitself.sendCommand("StartSession()")
+    return await self.sendCommand("StartSession()")
 
   async def endSession(self):
     endTag = await self.sendCommand("EndSession()")
@@ -194,26 +197,26 @@ class Client:
     return await self.sendCommand("EnumAllProp(%s)" % pointerString)
 
   async def getDMEVersion(self):
-    return self.sendCommand("GetDMEVersion()")
+    return await self.sendCommand("GetDMEVersion()")
 
 
   '''
   I++ DME Methods
   '''
   async def home(self):
-    return self.sendCommand("Home()")
+    return await self.sendCommand("Home()")
 
   async def isHomed(self):
-    return self.sendCommand("IsHomed()")
+    return await self.sendCommand("IsHomed()")
 
   async def enableUser(self):
-    return self.sendCommand("EnableUser()")
+    return await self.sendCommand("EnableUser()")
 
   async def disableUser(self):
-    return self.sendCommand("DisableUser()")
+    return await self.sendCommand("DisableUser()")
 
   async def isUserEnabled(self):
-    return self.sendCommand("IsUserEnabled()")
+    return await self.sendCommand("IsUserEnabled()")
 
   async def onPtMeasReport(self, ptMeasFormatString):
     '''
@@ -288,7 +291,7 @@ class Client:
     '''
     return await self.sendCommand("FindTool(%s)" % toolName)
   
-  async def foundTool(self);
+  async def foundTool(self):
     '''
     Acts as pointer to tool selected by FindTool command
     Default pointer is "UnDefTool" 
@@ -393,7 +396,7 @@ class Client:
   async def getCoordSystem(self):
     '''
     Query which coord sys is selected
-    ''''
+    '''
     return await self.sendCommand("GetCoordSystem()")
 
   async def getCsyTransformation(self, getCsyTransformationString):
@@ -477,19 +480,19 @@ class Client:
   '''
   I++ Scanning Methods
   '''
-  async def onScanReport(self, onScanReportString)
+  async def onScanReport(self, onScanReportString):
     '''
     Define the format of scan reports
     '''
     return await self.sendCommand("OnScanReport(%s)" % onScanReportString)
 
-  async def scanOnCircleHint(self, displacement, form)
+  async def scanOnCircleHint(self, displacement, form):
     '''
     Optimize ScanOnCircle execution by defining expected deviation from nominal of the measured circle
     '''
     return await self.sendCommand("ScanOnCircleHint(%s, %s)" % (displacement, form))
 
-  async def scanOnCircle(self, scanOnCircleString)
+  async def scanOnCircle(self, scanOnCircleString):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW)
@@ -502,13 +505,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCircle(%s)" % (scanOnCircleString))
 
-  async def scanOnLineHint(self, angle, form)
+  async def scanOnLineHint(self, angle, form):
     '''
     Optimize ScanOnLine execution by defining expected deviation from nominal of the measured line
     '''
     return await self.sendCommand("ScanOnLineHint(%s, %s)" % (angle, form))
 
-  async def scanOnLine(self, scanOnLineString)
+  async def scanOnLine(self, scanOnLineString):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Sx,Sy,Sz,Ex,Ey,Ez,i,j,k,StepW)
@@ -519,13 +522,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnLine(%s)" % (scanOnLineString))
 
-  async def scanOnCurveHint(self, deviation, minRadiusOfCurvature)
+  async def scanOnCurveHint(self, deviation, minRadiusOfCurvature):
     '''
     Optimize ScanOnCurve execution by defining expected deviation from nominal of the measured curve
     '''
     return await self.sendCommand("ScanOnCurveHint(%s, %s)" % (deviation, minRadiusOfCurvature))
   
-  async def scanOnCurveDensity(self, scanOnCurveDensityString)
+  async def scanOnCurveDensity(self, scanOnCurveDensityString):
     '''
     Define density of points returned from server by ScanOnCurve execution
     Parameters: (Dis(),Angle(),AngleBaseLength(),AtNominals())
@@ -538,7 +541,7 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCurveDensity(%s)" % (scanOnCurveDensityString))
 
-  async def scanOnCurve(self, scanOnCurveString)
+  async def scanOnCurve(self, scanOnCurveString):
     '''
     Perform a scanning measurement along a curve
     Parameters: ( 
@@ -567,7 +570,7 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCurve(%s)" % (scanOnCurveString))
 
-  async def scanOnHelix(self, scanOnHelixString)
+  async def scanOnHelix(self, scanOnHelixString):
     '''
     Perform a scanning measurement along a helical path
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW, pitch)
@@ -581,13 +584,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnHelix(%s)" % (scanOnHelixString))
 
-  async def scanUnknownHint(self, minRadiusOfCurvature)
+  async def scanUnknownHint(self, minRadiusOfCurvature):
     '''
     Define expected minimum radius of curvature during scan of unknown contour
     '''
     return await self.sendCommand("ScanUnknownHint(%s)" % (minRadiusOfCurvature))
 
-  async def scanUnknownDensity(self, scanUnknownDensityString)
+  async def scanUnknownDensity(self, scanUnknownDensityString):
       '''
       Define density of points returned from server by ScanUnknown execution
       Parameters: (Dis(),Angle(),AngleBaseLength())
@@ -599,7 +602,7 @@ class Client:
       '''
       return await self.sendCommand("ScanUnknownDensity(%s)" % (scanUnknownDensityString))
 
-  async def scanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString)
+  async def scanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -616,7 +619,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsSphere(%s)" % (scanInPlaneEndIsSphereString))
 
-  async def scanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString)
+  async def scanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the plane stop criterion is matched
@@ -633,7 +636,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsPlane(%s)" % (scanInPlaneEndIsPlaneString))
 
-  async def scanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString)
+  async def scanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the cylinder stop criterion is matched
@@ -650,7 +653,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsCyl(%s)" % (scanInPlaneEndIsCylString))
 
-  async def scanInCylEndIsSphere(self, scanInCylEndIsSphereString)
+  async def scanInCylEndIsSphere(self, scanInCylEndIsSphereString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -667,7 +670,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInCylEndIsSphere(%s)" % (scanInCylEndIsSphereString))
 
-  async def scanInCylEndIsPlane(self, scanInCylEndIsPlaneString)
+  async def scanInCylEndIsPlane(self, scanInCylEndIsPlaneString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
