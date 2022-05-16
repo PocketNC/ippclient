@@ -1,6 +1,5 @@
 import socket
 import sys
-from client import TcpClient, TcpClientNative
 from enum import Enum
 import time
 import asyncio
@@ -14,7 +13,7 @@ PORT = 1294
 
 status = 0
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s%(funcName)")
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class CmmException(Exception):
