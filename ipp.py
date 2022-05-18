@@ -7,14 +7,19 @@ import logging
 from tornado.ioloop import IOLoop
 from tornado.tcpclient import TCPClient
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 HOST = "10.0.0.1"
 PORT = 1294
 
-status = 0
+IPP_ACK_CHAR = "&"
+IPP_COMPLETE_CHAR = "%"
+IPP_DATA_CHAR = "#"
+IPP_ERR_CHAR = "!"
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+
+status = 0
 
 async def noop():
   pass
@@ -135,11 +140,28 @@ class Client:
     except Exception as e:
       logger.error(e)
 
-  async def handleMessage(self):
+  async def readMessage(self):
     msg = await self.stream.read_until(b"\r\n")
     msg = msg.decode("ascii")
     logger.debug("Rcv msg: %s", msg)
     return msg
+
+  async def handleMessages(self, ):
+    while True:
+      msg = await self.readMessage()
+      msgTag = msg[0:5]
+      if msgTag in self.transactions:
+        transaction = self.transactions[msgTag]
+        responseKey = msg[6]
+        if responseKey == IPP_ACK_CHAR:
+          await transaction.acknowledge()
+        elif responseKey == IPP_COMPLETE_CHAR:
+          await transaction.complete()
+        elif responseKey == IPP_DATE_CHAR:
+          await transaction.data(msg)
+        elif responseKey == IPP_ERROR_CHAR:
+          await transaction.error()
+
 
   async def sendAndWait(self, command):
     tag = await self.sendCommand(command)
