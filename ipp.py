@@ -170,51 +170,51 @@ class Client:
   '''
   I++ Server Methods
   '''
-  async def startSession(self, callbacks=None):
+  async def StartSession(self, callbacks=None):
     await self.sendCommand("EndSession()")
     return await self.sendCommand("StartSession()", callbacks=callbacks)
 
-  async def endSession(self, callbacks=None):
+  async def EndSession(self, callbacks=None):
     endTag = await self.sendCommand("EndSession()", callbacks=callbacks)
     self.nextTag = 1
     self.nextEventTag = 1
     return endTag
 
-  async def stopDaemon(self, eventTag, callbacks=None):
+  async def StopDaemon(self, eventTag, callbacks=None):
     return await self.sendCommand("StopDaemon(%s)" % eventTag, callbacks=callbacks)
 
-  async def stopAllDaemons(self, callbacks=None):
+  async def StopAllDaemons(self, callbacks=None):
     return await self.sendCommand("StopAllDaemons()", callbacks=callbacks)
 
-  async def abortE(self, callbacks=None):
+  async def AbortE(self, callbacks=None):
     '''
     Fast Queue command
     '''
     return await self.sendCommand("AbortE()", isEvent=True, callbacks=callbacks)
 
-  async def getErrorInfo(self, errNum=None, callbacks=None):
+  async def GetErrorInfo(self, errNum=None, callbacks=None):
     return await self.sendCommand("GetErrorInfo(%s)" % str(errNum or ''), callbacks=callbacks)
 
-  async def clearAllErrors(self, callbacks=None):
+  async def ClearAllErrors(self, callbacks=None):
     return await self.sendCommand("ClearAllErrors()", callbacks=callbacks)
 
-  async def getProp(self, propArr, callbacks=None):
+  async def GetProp(self, propArr, callbacks=None):
     propsString = ", ".join(propArr)
     return await self.sendCommand("GetProp(%s)" % propsString, callbacks=callbacks)
 
-  async def getPropE(self, propArr, callbacks=None):
+  async def GetPropE(self, propArr, callbacks=None):
     '''
     Fast Queue command
     '''
     propsString = ", ".join(propArr)
     return await self.sendCommand("GetPropE(%s)" % propsString, isEvent=true, callbacks=callbacks)
 
-  async def setProp(self, propArr, callbacks=None):
+  async def SetProp(self, propArr, callbacks=None):
     propsString = ", ".join(propArr)
     return await self.sendCommand("SetProp(%s)" % propsString, callbacks=callbacks)
 
   
-  async def enumProp(self, pointerString, callbacks=None):
+  async def EnumProp(self, pointerString, callbacks=None):
     '''
     Get the list of properties for a system object
     For example, "EnumProp(Tool.PtMeasPar())" will return 
@@ -222,41 +222,41 @@ class Client:
     '''
     return await self.sendCommand("EnumProp(%s)" % pointerString, callbacks=callbacks)
 
-  async def enumAllProp(self, pointerString, callbacks=None):
+  async def EnumAllProp(self, pointerString, callbacks=None):
     '''
     Get the entire tree of properties and sub-properties for a system object
     '''
     return await self.sendCommand("EnumAllProp(%s)" % pointerString, callbacks=callbacks)
 
-  async def getDMEVersion(self, callbacks=None):
+  async def GetDMEVersion(self, callbacks=None):
     return await self.sendCommand("GetDMEVersion()", callbacks=callbacks)
 
 
   '''
   I++ DME Methods
   '''
-  async def home(self, callbacks=None):
+  async def Home(self, callbacks=None):
     return await self.sendCommand("Home()", callbacks=callbacks)
 
-  async def isHomed(self, callbacks=None):
+  async def IsHomed(self, callbacks=None):
     return await self.sendCommand("IsHomed()", callbacks=callbacks)
 
-  async def enableUser(self, callbacks=None):
+  async def EnableUser(self, callbacks=None):
     return await self.sendCommand("EnableUser()", callbacks=callbacks)
 
-  async def disableUser(self, callbacks=None):
+  async def DisableUser(self, callbacks=None):
     return await self.sendCommand("DisableUser()", callbacks=callbacks)
 
-  async def isUserEnabled(self, callbacks=None):
+  async def IsUserEnabled(self, callbacks=None):
     return await self.sendCommand("IsUserEnabled()", callbacks=callbacks)
 
-  async def onPtMeasReport(self, ptMeasFormatString, callbacks=None):
+  async def OnPtMeasReport(self, ptMeasFormatString, callbacks=None):
     '''
     Define the information reported in the result of a PtMeas command
     '''
     return await self.sendCommand("OnPtMeasReport(%s)" % ptMeasFormatString, callbacks=callbacks)
 
-  async def onMoveReportE(self, onMoveReportFormatString, callbacks=None):
+  async def OnMoveReportE(self, onMoveReportFormatString, callbacks=None):
     '''
     Fast Queue command
     Start a daemon that reports machine movement, and define
@@ -264,10 +264,10 @@ class Client:
     '''
     return await self.sendCommand("OnMoveReportE(%s)" % onMoveReportFormatString, isEvent=True, callbacks=callbacks)
 
-  async def getMachineClass(self, callbacks=None):
+  async def GetMachineClass(self, callbacks=None):
     return await self.sendCommand("GetMachineClass()", callbacks=callbacks)
 
-  async def getErrStatusE(self, callbacks=None):
+  async def GetErrStatusE(self, callbacks=None):
     '''
     Fast Queue command
     Response is "ErrStatus(1)" if in error
@@ -275,7 +275,7 @@ class Client:
     '''
     return await self.sendCommand("GetErrStatusE()", isEvent=true, callbacks=callbacks)
 
-  async def getXtdErrStatus(self, callbacks=None):
+  async def GetXtdErrStatus(self, callbacks=None):
     '''
     Response is one or more lines of status information
     Could also include one or more errors
@@ -287,7 +287,7 @@ class Client:
     '''
     return await self.sendCommand("GetXtdErrStatus()", callbacks=callbacks)
 
-  async def get(self, queryString, callbacks=None):
+  async def Get(self, queryString, callbacks=None):
     '''
     Query tool position
     queryString example:
@@ -295,13 +295,13 @@ class Client:
     '''
     return await self.sendCommand("Get(%s)" % queryString, callbacks=callbacks)
 
-  async def goTo(self, positionString, callbacks=None):
+  async def GoTo(self, positionString, callbacks=None):
     '''
     Move to a target position, including tool rotation
     '''
     return await self.sendCommand("GoTo(%s)" % positionString, callbacks=callbacks)
 
-  async def ptMeas(self, ptMeasString, callbacks=None):
+  async def PtMeas(self, ptMeasString, callbacks=None):
     '''
     Execute a single point measurement
     Necessary parameters are defined by the active tool
@@ -311,100 +311,100 @@ class Client:
     return await self.sendCommand("PtMeas(%s)" % ptMeasString, callbacks=callbacks)
 
   # See examples 7.6 and 7.7 in IDME specification for tool handling examples
-  async def tool(self, callbacks=None):
+  async def Tool(self, callbacks=None):
     '''
     Select a pointer to the active tool
     '''
     return await self.sendCommand("Tool()", callbacks=callbacks)
 
-  async def findTool(self, toolName, callbacks=None):
+  async def FindTool(self, toolName, callbacks=None):
     '''
     Select a pointer to a tool with a known name
     '''
     return await self.sendCommand("FindTool(%s)" % toolName, callbacks=callbacks)
   
-  async def foundTool(self, callbacks=None):
+  async def FoundTool(self, callbacks=None):
     '''
     Acts as pointer to tool selected by FindTool command
     Default pointer is "UnDefTool" 
     '''
     return await self.sendCommand("FoundTool()", callbacks=callbacks)
 
-  async def changeTool(self, toolName, callbacks=None):
+  async def ChangeTool(self, toolName, callbacks=None):
     '''
     Perform a tool change
     '''
     return await self.sendCommand("ChangeTool(%s)" % toolName, callbacks=callbacks)
 
-  async def setTool(self, toolName, callbacks=None):
+  async def SetTool(self, toolName, callbacks=None):
     '''
     Force the server to assume a given tool is the active tool
     '''
     return await self.sendCommand("SetTool(%s)" % toolName, callbacks=callbacks)
 
-  async def alignTool(self, alignToolString, callbacks=None):
+  async def AlignTool(self, alignToolString, callbacks=None):
     '''
     Orientate an alignable tool
     '''
     return await self.sendCommand("AlignTool(%s)" % alignToolString, callbacks=callbacks)
 
-  async def goToPar(self, callbacks=None):
+  async def GoToPar(self, callbacks=None):
     '''
     This method acts as a pointer to the GoToParameter block of the DME
     '''
     return await self.sendCommand("GoToPar()", callbacks=callbacks)
 
-  async def prMeasPar(self, callbacks=None):
+  async def PrMeasPar(self, callbacks=None):
     '''
     This method acts as a pointer to the PtMeasParameter block of the DME
     '''
     return await self.sendCommand("PtMeasPar()", callbacks=callbacks)
 
-  async def enumTools(self, callbacks=None):
+  async def EnumTools(self, callbacks=None):
     '''
     Returns a list of the names of available tools
     '''
     return await self.sendCommand("enumTools()", callbacks=callbacks)
 
-  async def getChangeToolAction(self, toolName, callbacks=None):
+  async def GetChangeToolAction(self, toolName, callbacks=None):
     '''
     Query the necessary movement to change to a given tool
     '''
     return await self.sendCommand("GetChangeToolAction(%s)" % toolName, callbacks=callbacks)
 
-  async def enumToolCollection(self, collectionName, callbacks=None):
+  async def EnumToolCollection(self, collectionName, callbacks=None):
     '''
     Query the names and types of tools (or child collections) belonging to a collection
     '''
     return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
 
-  async def enumAllToolCollections(self, collectionName, callbacks=None):
+  async def EnumAllToolCollections(self, collectionName, callbacks=None):
     '''
     Recursively return all tools and sub-collections to this collection
     '''
     return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
 
-  async def openToolCollection(self, collectionName, callbacks=None):
+  async def OpenToolCollection(self, collectionName, callbacks=None):
     '''
     Make all tools in referenced collection visible, meaning a ChangeTool command can
     directly use names in the collection without a path extension
     '''
     return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
 
-  async def ijkAct(self, callbacks=None):
+  async def IjkAct(self, callbacks=None):
     '''
     Query the meaning of server IJK() values: actual measured normal, nominal, or tool alignment
     '''
     return await self.sendCommand("IJKAct()", callbacks=callbacks)
 
-  async def ptMeasSelfCenter(self, ptMeasSelfCenterString, callbacks=None):
+  async def PtMeasSelfCenter(self, ptMeasSelfCenterString, callbacks=None):
     '''
     Execute a single point measurement by self-centering probing
     Necessary parameters defined by the active tool
     '''
     return await self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString, callbacks=callbacks)
 
-  async def ptMeasSelfCenterLocked(self, ptMeasSelfCenterString, callbacks=None):
+  async def PtMeasSelfCenterLocked(self, ptMeasSelfCenterString, callbacks=None):
     '''
     Execute a single point measurement by self-centering probing
     without leaving a plane defined by params
@@ -412,96 +412,96 @@ class Client:
     '''
     return await self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString, callbacks=callbacks)
 
-  async def readAllTemperatures(self, callbacks=None):
+  async def ReadAllTemperatures(self, callbacks=None):
     return await self.sendCommand("ReadAllTemperatures()", callbacks=callbacks)
 
 
   '''
   I++ CartCMM Methods
   '''
-  async def setCoordSystem(self, coodSystemString, callbacks=None):
+  async def SetCoordSystem(self, coodSystemString, callbacks=None):
     '''
     Arg is one of: MachineCsy, MoveableMachineCsy, MultipleArmCsy, RotaryTableVarCsy, PartCsy
     '''
     return await self.sendCommand("SetCoordSystem(%s)" % coodSystemString, callbacks=callbacks)
 
-  async def getCoordSystem(self, callbacks=None):
+  async def GetCoordSystem(self, callbacks=None):
     '''
     Query which coord sys is selected
     '''
     return await self.sendCommand("GetCoordSystem()", callbacks=callbacks)
 
-  async def getCsyTransformation(self, getCsyTransformationString, callbacks=None):
+  async def GetCsyTransformation(self, getCsyTransformationString, callbacks=None):
     return await self.sendCommand("GetCsyTransformation(%s)" % getCsyTransformationString, callbacks=callbacks)
 
-  async def setCsyTransformation(self, setCsyTransformationString, callbacks=None):
+  async def SetCsyTransformation(self, setCsyTransformationString, callbacks=None):
     return await self.sendCommand("SetCsyTransformation(%s)" % setCsyTransformationString, callbacks=callbacks)
 
-  async def saveActiveCoordSystem(self, csyName, callbacks=None):
+  async def SaveActiveCoordSystem(self, csyName, callbacks=None):
     return await self.sendCommand("SaveActiveCoordSystem(%s)" % csyName, callbacks=callbacks)
 
-  async def loadCoordSystem(self, csyName, callbacks=None):
+  async def LoadCoordSystem(self, csyName, callbacks=None):
     return await self.sendCommand("LoadCoordSystem(%s)" % csyName, callbacks=callbacks)
     
-  async def deleteCoordSystem(self, csyName, callbacks=None):
+  async def DeleteCoordSystem(self, csyName, callbacks=None):
     return await self.sendCommand("DeleteCoordSystem(%s)" % csyName, callbacks=callbacks)
 
-  async def enumCoordSystem(self, name, callbacks=None):
+  async def EnumCoordSystem(self, name, callbacks=None):
     return await self.sendCommand("EnumCoordSystem()", callbacks=callbacks)
 
-  async def getNamedCsyTransformation(self, csyName, callbacks=None):
+  async def GetNamedCsyTransformation(self, csyName, callbacks=None):
     return await self.sendCommand("GetNamedCsyTransformation(%s)" % csyName, callbacks=callbacks)
   
-  async def saveNamedCsyTransformation(self, csyName, csyCoordsString, callbacks=None):
+  async def SaveNamedCsyTransformation(self, csyName, csyCoordsString, callbacks=None):
     return await self.sendCommand("SaveNamedCsyTransformation(%s, %s)" % (csyName, csyCoordsStsring), callbacks=callbacks)
 
 
   '''
   I++ Tool Methods
   '''
-  async def reQualify(self, callbacks=None):
+  async def ReQualify(self, callbacks=None):
     '''
     Requalify active tool
     '''
     return await self.sendCommand("ReQualify()", callbacks=callbacks)
 
-  async def scanPar(self, callbacks=None):
+  async def ScanPar(self, callbacks=None):
     '''
     Acts as a pointer to the ScanParameter block of KTool instance
     '''
     return await self.sendCommand("ScanPar()", callbacks=callbacks)
 
-  async def avrRadius(self, callbacks=None):
+  async def AvrRadius(self, callbacks=None):
     '''
     Return average tip radius of selected tool
     '''
     return await self.sendCommand("AvrRadius()", callbacks=callbacks)
 
-  async def isAlignable(self, callbacks=None):
+  async def IsAlignable(self, callbacks=None):
     '''
     Query if selected tool is alignable
     '''
     return await self.sendCommand("IsAlignable()", callbacks=callbacks)
 
-  async def alignment(self, alignmentVectorString, callbacks=None):
+  async def Alignment(self, alignmentVectorString, callbacks=None):
     '''
     Query if selected tool is alignable
     '''
     return await self.sendCommand("Alignment(%s)" % alignmentVectorString, callbacks=callbacks)
 
-  async def calcToolAlignment(self, calcToolAlignmentString, callbacks=None):
+  async def CalcToolAlignment(self, calcToolAlignmentString, callbacks=None):
     '''
     Query the alignment of selected tool
     '''
     return await self.sendCommand("CalcToolAlignment(%s)" % calcToolAlignmentString, callbacks=callbacks)
 
-  async def calcToolAngles(self, calcToolAnglesString, callbacks=None):
+  async def CalcToolAngles(self, calcToolAnglesString, callbacks=None):
     '''
     Query the alignment of selected tool
     '''
     return await self.sendCommand("CalcToolAngles(%s)" % calcToolAnglesString, callbacks=callbacks)
 
-  async def useSmallestAngleToAlignTool(self, enabled, callbacks=None):
+  async def UseSmallestAngleToAlignTool(self, enabled, callbacks=None):
     '''
     Param is 0 or 1
     When enabled with CalcToolAngles(1), attempting to rotate the tool by
@@ -512,19 +512,19 @@ class Client:
   '''
   I++ Scanning Methods
   '''
-  async def onScanReport(self, onScanReportString, callbacks=None):
+  async def OnScanReport(self, onScanReportString, callbacks=None):
     '''
     Define the format of scan reports
     '''
     return await self.sendCommand("OnScanReport(%s)" % onScanReportString, callbacks=callbacks)
 
-  async def scanOnCircleHint(self, displacement, form, callbacks=None):
+  async def ScanOnCircleHint(self, displacement, form, callbacks=None):
     '''
     Optimize ScanOnCircle execution by defining expected deviation from nominal of the measured circle
     '''
     return await self.sendCommand("ScanOnCircleHint(%s, %s)" % (displacement, form), callbacks=callbacks)
 
-  async def scanOnCircle(self, scanOnCircleString, callbacks=None):
+  async def ScanOnCircle(self, scanOnCircleString, callbacks=None):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW)
@@ -537,13 +537,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCircle(%s)" % (scanOnCircleString), callbacks=callbacks)
 
-  async def scanOnLineHint(self, angle, form, callbacks=None):
+  async def ScanOnLineHint(self, angle, form, callbacks=None):
     '''
     Optimize ScanOnLine execution by defining expected deviation from nominal of the measured line
     '''
     return await self.sendCommand("ScanOnLineHint(%s, %s)" % (angle, form), callbacks=callbacks)
 
-  async def scanOnLine(self, scanOnLineString, callbacks=None):
+  async def ScanOnLine(self, scanOnLineString, callbacks=None):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Sx,Sy,Sz,Ex,Ey,Ez,i,j,k,StepW)
@@ -554,13 +554,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnLine(%s)" % (scanOnLineString), callbacks=callbacks)
 
-  async def scanOnCurveHint(self, deviation, minRadiusOfCurvature, callbacks=None):
+  async def ScanOnCurveHint(self, deviation, minRadiusOfCurvature, callbacks=None):
     '''
     Optimize ScanOnCurve execution by defining expected deviation from nominal of the measured curve
     '''
     return await self.sendCommand("ScanOnCurveHint(%s, %s)" % (deviation, minRadiusOfCurvature), callbacks=callbacks)
   
-  async def scanOnCurveDensity(self, scanOnCurveDensityString, callbacks=None):
+  async def ScanOnCurveDensity(self, scanOnCurveDensityString, callbacks=None):
     '''
     Define density of points returned from server by ScanOnCurve execution
     Parameters: (Dis(),Angle(),AngleBaseLength(),AtNominals())
@@ -573,7 +573,7 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCurveDensity(%s)" % (scanOnCurveDensityString), callbacks=callbacks)
 
-  async def scanOnCurve(self, scanOnCurveString, callbacks=None):
+  async def ScanOnCurve(self, scanOnCurveString, callbacks=None):
     '''
     Perform a scanning measurement along a curve
     Parameters: ( 
@@ -602,7 +602,7 @@ class Client:
     '''
     return await self.sendCommand("ScanOnCurve(%s)" % (scanOnCurveString), callbacks=callbacks)
 
-  async def scanOnHelix(self, scanOnHelixString, callbacks=None):
+  async def ScanOnHelix(self, scanOnHelixString, callbacks=None):
     '''
     Perform a scanning measurement along a helical path
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW, pitch)
@@ -616,13 +616,13 @@ class Client:
     '''
     return await self.sendCommand("ScanOnHelix(%s)" % (scanOnHelixString), callbacks=callbacks)
 
-  async def scanUnknownHint(self, minRadiusOfCurvature, callbacks=None):
+  async def ScanUnknownHint(self, minRadiusOfCurvature, callbacks=None):
     '''
     Define expected minimum radius of curvature during scan of unknown contour
     '''
     return await self.sendCommand("ScanUnknownHint(%s)" % (minRadiusOfCurvature), callbacks=callbacks)
 
-  async def scanUnknownDensity(self, scanUnknownDensityString, callbacks=None):
+  async def ScanUnknownDensity(self, scanUnknownDensityString, callbacks=None):
       '''
       Define density of points returned from server by ScanUnknown execution
       Parameters: (Dis(),Angle(),AngleBaseLength())
@@ -634,7 +634,7 @@ class Client:
       '''
       return await self.sendCommand("ScanUnknownDensity(%s)" % (scanUnknownDensityString), callbacks=callbacks)
 
-  async def scanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString, callbacks=None):
+  async def ScanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString, callbacks=None):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -651,7 +651,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsSphere(%s)" % (scanInPlaneEndIsSphereString), callbacks=callbacks)
 
-  async def scanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString, callbacks=None):
+  async def ScanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString, callbacks=None):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the plane stop criterion is matched
@@ -668,7 +668,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsPlane(%s)" % (scanInPlaneEndIsPlaneString), callbacks=callbacks)
 
-  async def scanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString, callbacks=None):
+  async def ScanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString, callbacks=None):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the cylinder stop criterion is matched
@@ -685,7 +685,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInPlaneEndIsCyl(%s)" % (scanInPlaneEndIsCylString), callbacks=callbacks)
 
-  async def scanInCylEndIsSphere(self, scanInCylEndIsSphereString, callbacks=None):
+  async def ScanInCylEndIsSphere(self, scanInCylEndIsSphereString, callbacks=None):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -702,7 +702,7 @@ class Client:
     '''
     return await self.sendCommand("ScanInCylEndIsSphere(%s)" % (scanInCylEndIsSphereString), callbacks=callbacks)
 
-  async def scanInCylEndIsPlane(self, scanInCylEndIsPlaneString, callbacks=None):
+  async def ScanInCylEndIsPlane(self, scanInCylEndIsPlaneString, callbacks=None):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
