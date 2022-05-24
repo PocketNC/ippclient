@@ -1,90 +1,177 @@
 '''
-A set of test methods that perform a variety of measurements
+A set of routines that perform common command sequeunces and can be used in consumer applications
 '''
 import sys
 import ipp
+from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, float3
 import asyncio
-
+from tornado.ioloop import IOLoop
+import math
 
 HOST = "10.0.0.1"
 PORT = 1294
 
 
-
-
 '''
-Check the homed status of the CMM
-Attach callbacks for different response messages (homed, unhomed, error)
-Run the appropriate callback
+Ensure that the CMM is homed
+  Prepare to send IsHomed
+    data response callback
+      if not already homed, send home command
+    error response callback
+      bail out
+  Send IsHomed command
+  Wait until confirmation CMM is homed, or quit upon error
 '''
-async def homing():
-  client = ipp.Client(HOST, PORT)
+async def ensureHomed(client):
+
+  homedEvent = asyncio.Event()
+  waitForHomedTask = asyncio.create_task(waitForEvent(homedEvent))
 
   async def homeCompleteCallback():
-    print("homing complete")
+    homedEvent.set()
 
   async def isHomedDataCallback(msg):
-    isCmmHomed = msg[-4] == "0"
+    isCmmHomed = msg[-4] == "1"
     if not isCmmHomed:
       homeCallbacks = ipp.TransactionCallbacks(complete=homeCompleteCallback)
-      await client.home(callbacks=homeCallbacks)
+      await client.Home(callbacks=homeCallbacks)
+    else:
+      homedEvent.set()
 
-
-  if not await client.connect():
-    print("Failed to connect to server.")
-
-  await client.startSession()
-
+  async def isHomedErrorCallback(msg):
+    print("Got error from isHomed")
+  
   isHomedCallbacks = ipp.TransactionCallbacks(data=isHomedDataCallback)
-  isHomedTag = await client.isHomed(isHomedCallbacks)
-  # callbacks[isHomedTag] = {}
-  # callbacks[isHomedTag]["&"] = None
-  # callbacks[isHomedTag]["%"] = None
-  # callbacks[isHomedTag]["#"] = isHomedCallback
-  while True:
-    msg = await client.handleMessage()
-    print("homing: %s" % msg)
-    msgTag = msg[0:5]
-    if msgTag in client.transactions:
-      transaction = client.transactions[msgTag]
-      responseKey = msg[6]
-      if responseKey == "&":
-        await transaction.acknowledge()
-      elif responseKey == "%":
-        await transaction.complete()
-      elif responseKey == "#":
-        await transaction.data(msg)
-      elif responseKey == "!":
-        await transaction.error()
+  isHomedTag = await client.IsHomed(isHomedCallbacks)
 
-  #     if responseKey in callbacks[msgTag]:
-  #       isCmmHomed = await callbacks[msgTag][responseKey](msg)
-  #       break
-  # callbacks = {}
-  # if not isCmmHomed:
-  #   homeTagNum = await client.home()
-  #   homeTag = "%05d" % homeTagNum
-  #   callbacks[homeTag] = {}
-  #   # callbacks[homeTag]["&"] = None
-  #   callbacks[homeTag]["%"] = homeCompleteCallback
-  #   while True:
-  #     msg = await client.handleMessage()
-  #     msgTag = msg[0:5]
-  #     if msgTag in callbacks:
-  #       responseKey = msg[6]
-  #       if responseKey in callbacks[msgTag]:
-  #         await callbacks[msgTag][responseKey]()
-  #         break
+  print('waiting')
+  await waitForHomedTask
+  print('finished')
+
+async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints, surfaceWidth, dir, probeAngle):
+  toolLength = 117.8
+  global points
+  points = []
+  async def ptMeasData(data):
+    global points
+    print("ptmeas: %s" % data)
+    x = float(data[data.find("X(") + 2 : data.find("), Y")])
+    y = float(data[data.find("Y(") + 2 : data.find("), Z")])
+    z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
+    pt = float3(x,y,z)
+    points.append(pt)
+
+  angle = 2*180/math.pi*math.atan(0.5*length/clearance)
+  midPos = startPos + (0.5 * length) * lineVec
+  perpVec = float3(lineVec.y, lineVec.x, lineVec.z).normalize()
+  midPosApproach = midPos + perpVec * clearance
+  await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s),Tool.A(15),Tool.B(-90)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z))
+  centerRot = midPosApproach - float3(toolLength * math.sin(15*math.pi/180),0,0)
+  print(midPosApproach)
+  print(centerRot)
+  input()
+  await waitForCommandComplete(client.SetProp, "Tool.PtMeasPar.HeadTouch(1)")
+  input()
+  for step in range(numPoints):
+    fracLen = step / numPoints * length
+    contactPos = startPos + lineVec * (step / (numPoints-1) * length)
+    print("ContactPos %s" % contactPos)
+    probeTravelVec = contactPos - centerRot 
+    approachPos = midPos + (0.5*probeTravelVec)
+    await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,probeTravelVec.z), otherCallbacks={'data': ptMeasData})
+    # input()
+
+    
+
+
+'''
+Using only head movement, define a linear element
+This offers improved speed compared to using machine movement
+However, this method is limited in the geometry of the features it can measure
+  The length of the line,...
+  the width of the actual surface the theoretical line sits upon,...
+  and the length of the probe assembly...
+  ...together these factors determine whether a particular measurement is possible
+
+dir = sets B-rotate direction
+  +1 indicates CW rotate
+
+Find the angle covered (assume a 10mm clearance)
+Foreach angular step
+  Find the expected contact point: intersection of line from midpoint along angle with feature line
+  Step back on this line a fraction to define the approach point
+'''
+async def headOnlyLineOnVerticalFace(client, startPos, lineVec, length, numPoints, surfaceWidth, dir, probeAngle):
+
+  global calcToolAlignmentData
+
+  async def getData(data):
+    global calcToolAlignmentData
+    print("getData")
+    print(data)
+    calcToolAlignmentData = data[data.find("(") + 1:data.find("))") - 2]
+
+  getPosDataCallback = getData
+  await waitForCommandComplete(client.CalcToolAlignment, "Tool.A(15),Tool.B(-90)", otherCallbacks={'data': getData})
+
+  print("------------------------------")
+  print("calcToolAlignmentData: %s" % calcToolAlignmentData)
+
+  #perpendicular vector in XY plane
+  print("startPos %s " % startPos)
+  perpVec = float3(startPos.y, startPos.z, startPos.x).normalize()
+  print("perpVec %s " % perpVec) 
+  #find the midpoint 
+  #we will position probe body so probe swing is perpendicular to face at midpoint
+  midPos = startPos + (0.5 * length) * lineVec
+  midPosApproach = midPos + perpVec * 10
+  print("midPos %s " % midPos)
+  print("midPosApproach %s " % midPosApproach)
+
+  #find the angle between the mid-point and start-point probe travel vectors
+  midApproachVec = midPos - midPosApproach
+  edgeApproachVec = startPos - midPosApproach
+  midToEdgeDotProduct = midApproachVec.inner(edgeApproachVec)
+  halfAngle = 180/math.pi * math.acos(midToEdgeDotProduct / edgeApproachVec.norm() / midApproachVec.norm())
+  fullAngle = halfAngle * 2
+  stepAngle = fullAngle/numPoints
+
+  await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s),Tool.A(15),Tool.B(-90)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z))
+
+  input()
+  global points
+  points = []
+  async def ptMeasData(data):
+    global points
+    print("ptmeas: %s" % data)
+    x = float(data[data.find("X(") + 2 : data.find("), Y")])
+    y = float(data[data.find("Y(") + 2 : data.find("), Z")])
+    z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
+    pt = float3(x,y,z)
+    points.append(pt)
+
+  startAngle = -90 + halfAngle
+  startPosApproach = startPos + perpVec * 10
+
+  endPos = startPos + lineVec * length
+  endPosApproach = endPos + perpVec * 10
+
+  await waitForCommandComplete(client.CalcToolAlignment, "Tool.A(15),Tool.B(%s)" % startAngle, otherCallbacks={'data': getData})
+  await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(0.371,.928,-0.16)" % (startPosApproach.x,startPosApproach.y,startPosApproach.z), otherCallbacks={'data': ptMeasData})
+  input()
+  await waitForCommandComplete(client.CalcToolAlignment, "Tool.A(15),Tool.B(%s)" % -90, otherCallbacks={'data': getData})
+  await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(0.99,0,-0.16)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z), otherCallbacks={'data': ptMeasData})
+  input()
+  await waitForCommandComplete(client.CalcToolAlignment, "Tool.A(15),Tool.B(%s)" % (-90 - halfAngle)  , otherCallbacks={'data': getData})
+  await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(0.371,-.928,-0.16)" % (endPosApproach.x,endPosApproach.y,endPosApproach.z), otherCallbacks={'data': ptMeasData})
+  # await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(-0.096,0.24,0),Tool.Alignment(%s)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z,calcToolAlignmentData), otherCallbacks={'data': ptMeasData})
 
 
 
 
 async def surface():
-  print('surface')
-  host = "10.0.0.1"
-  port = 1294
-  client = ipp.Client(host, port)
-
+  client = ipp.Client(HOST, PORT)
+  
   if not await client.connect():
     print("Failed to connect to server.")
 
@@ -104,6 +191,9 @@ async def surface():
   await sendAndWait(client.endSession)
 
   print(client.transactions)
+
+
+
 
 '''
 Command a single linear move on CMM
@@ -111,32 +201,67 @@ Attach callbacks for ACK, COMPLETE, and ERROR
 (I'm expecting to trigger ERROR by touching the probe mid-move)
 '''
 async def move():
-  print('move')
+
+  await homing()
+
+  async def wait(event):
+    await event.wait()
   
+  waitForGoToEvent = asyncio.Event()
+  waitForGoToTask = asyncio.create_task(wait(waitForGoToEvent))
+
   client = ipp.Client(HOST, PORT)
+  isHomed = False
 
   if not await client.connect():
     print("Failed to connect to server.")
 
-  #status check
-  await client.isHomed()
+  # IOLoop.instance().add_callback(client.handleMessages)
+  messageHandler = asyncio.create_task(client.handleMessages())
 
-  async def sendAndWait(ippCommandMethod):
-    # print("Send and wait: %s" % ippCommandMethod)
-    tag = await ippCommandMethod()
-    # print("Command tag %s" % tag)
-    while True:
-      msg = await client.handleMessage()
-      # print("Got msg: %s" % msg)
-      if ("%05d %%" % (tag)) in msg:
-        # print("%05d transaction complete" % tag)
-        break
+  await client.StartSession()
+  await client.ClearAllErrors()
+  await client.SetTool("Component_3.1.50.4.A0.0-B0.0")
 
-  await sendAndWait(client.startSession)
-  await sendAndWait(client.getDMEVersion)
-  await sendAndWait(client.endSession)
+  # await client.GetXtdErrStatus()
+  # await asyncio.sleep(2)
+  
+  # await client.SetProp(["Tool.GoToPar.Speed(2)"])
+  # await asyncio.sleep(3)
 
-  print(client.transactions)
+  # await client.GetXtdErrStatus()
+  # await asyncio.sleep(2)
+  # await client.ClearAllErrors()
+  # await asyncio.sleep(2)
+
+  async def goToError():
+    print("got an error")
+    waitForGoToEvent.set()
+
+  async def goToComplete():
+    print("completed GoTo")
+    waitForGoToEvent.set()
+
+  goToCallbacks = ipp.TransactionCallbacks(error=goToError, complete=goToComplete)
+
+  await client.GoTo("Y(0)", goToCallbacks)
+
+  print('waiting')
+  await waitForGoToTask
+  print('finished')
+
+  await client.EndSession()
+  await client.disconnect()
+
+  # await client.GoTo("X(0)")
+
+
+
+
+
+
+
+
 
 
 

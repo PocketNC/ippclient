@@ -6,6 +6,9 @@ import asyncio
 import logging
 from tornado.ioloop import IOLoop
 from tornado.tcpclient import TCPClient
+from tornado.iostream import StreamClosedError
+from dataclasses import dataclass
+import math
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -16,13 +19,104 @@ PORT = 1294
 IPP_ACK_CHAR = "&"
 IPP_COMPLETE_CHAR = "%"
 IPP_DATA_CHAR = "#"
-IPP_ERR_CHAR = "!"
+IPP_ERROR_CHAR = "!"
 
 
 status = 0
 
-async def noop():
+class float3:
+  def __init__(self, *args):
+    if len(args)==0: 
+      self.values = (0,0,0)
+    if len(args)==1 and isinstance(args[0], float3):
+      self.values = args[0].values
+    elif len(args) == 3:
+      self.values = args
+    else: 
+      raise ValueError("Invalid args {} for float3".format(args))
+    self.x = self.values[0]
+    self.y = self.values[1]
+    self.z = self.values[2]
+  
+  def __sub__(self, other):
+    """ Returns the vector difference of self and other """
+    if isinstance(other, float3):
+      subbed = float3(self.x-other.x,self.y-other.y,self.z-other.z)
+    elif isinstance(other, (int, float)):
+      subbed = float3( a - other for a in self )
+    else:
+        raise ValueError("Subtraction with type {} not supported".format(type(other)))
+    return self.__class__(*subbed)
+  def __rsub__(self, other):
+      return self.__sub__(other)
+
+  def __add__(self, other):
+    """ Returns the vector addition of self and other """
+    if isinstance(other, float3):
+      added = float3(other.x+self.x,other.y+self.y,other.z+self.z)
+    elif isinstance(other, (int, float)):
+      added = float3( a + other for a in self )
+    else:
+      raise ValueError("Addition with type {} not supported".format(type(other)))
+    return added
+  def __radd__(self, other):
+    return self.__add__(other)
+
+  def __mul__(self,other):
+    print(other)
+    if isinstance(other, float3):
+      product = float3(other.x * self.x,other.y * self.y,other.z * self.z)
+      return product
+    elif isinstance(other, (int, float)):
+      product = float3(self.x*other, self.y*other, self.z*other)
+      return product
+    else:
+      raise ValueError("Multiplication with type {} not supported".format(type(other)))
+  def __rmul__(self, other):
+      """ Called if 4 * self for instance """
+      return self.__mul__(other)
+  def norm(self):
+        """ Returns the norm (length, magnitude) of the vector """
+        return math.sqrt(sum( x*x for x in self ))
+  def normalize(self):
+        """ Returns a normalized unit vector """
+        norm = self.norm()
+        normed = tuple( x / norm for x in self )
+        return self.__class__(*normed)
+  def __iter__(self):
+    for val in [self.x,self.y,self.z]:
+      yield val
+  def __repr__(self):
+        return str(self.values)
+
+  def inner(self, vector):
+    """ Returns the dot product (inner product) of self and another vector
+    """
+    if not isinstance(vector, float3):
+      raise ValueError('The dot product requires another vector')
+    return sum(a * b for a, b in zip(self, vector))
+
+
+async def noop(args=None):
   pass
+
+async def setEvent(event):
+  event.set()
+
+async def waitForEvent(event):
+  await event.wait()
+
+async def waitForCommandComplete(cmd, *args, otherCallbacks=None):
+  cmdCompleted = asyncio.Event()
+  waitTask = asyncio.create_task(waitForEvent(cmdCompleted))
+  logger.debug(otherCallbacks)
+  if otherCallbacks:
+    callbacks = TransactionCallbacks(complete=(lambda: setEvent(cmdCompleted)), **otherCallbacks)
+  else:
+    callbacks = TransactionCallbacks(complete=(lambda: setEvent(cmdCompleted)))
+  logger.debug(callbacks.complete)
+  await cmd(*args, callbacks=callbacks)
+  await waitTask
 
 class CmmException(Exception):
   pass
@@ -35,7 +129,7 @@ class TransactionStatus(Enum):
   COMPLETE = 3
 
 class TransactionCallbacks:
-  def __init__(self, send=noop, ack=noop, complete=noop, data=noop, error=noop):
+  def __init__(self, send=None, ack=None, complete=None, data=None, error=None):
     self.send = send
     self.ack = ack
     self.complete = complete
@@ -51,23 +145,35 @@ class Transaction:
 
   async def send(self):
     self.status = TransactionStatus.SENT
-    await self.callbacks.send()
+    if self.callbacks.send:
+      await self.callbacks.send()
 
   async def acknowledge(self):
     self.status = TransactionStatus.ACK
-    await self.callbacks.ack()
+    if self.callbacks.ack:
+      await self.callbacks.ack()
 
   async def data(self, data):
+    logger.debug(self.callbacks.data)
+    logger.debug(data)
     self.dataList.append(data)
-    await self.callbacks.data(data)
+    if self.callbacks.data:
+      logger.debug('data callback')
+      await self.callbacks.data(data)
+      logger.debug('data callback end')
 
   async def error(self, err):
+    logger.debug("in error: %s" % err)
     self.errorList.append(err)
-    await self.callbacks.error(err)
+    if self.callbacks.error:
+      logger.debug('error callback')
+      await self.callbacks.error(err)
+      logger.debug('error callback end')
 
   async def complete(self):
     self.status = TransactionStatus.COMPLETE
-    await self.callbacks.complete()
+    if self.callbacks.complete:
+      await self.callbacks.complete()
 
 
 RECEIVE_SIZE = 1024
@@ -146,22 +252,33 @@ class Client:
     logger.debug("Rcv msg: %s", msg)
     return msg
 
-  async def handleMessages(self, ):
-    while True:
-      msg = await self.readMessage()
-      msgTag = msg[0:5]
-      if msgTag in self.transactions:
-        transaction = self.transactions[msgTag]
+  async def handleMessages(self, stopTag=None, stopKey=None):
+    '''
+    Run this in a coroutine
+    '''
+    logger.debug("started handling messages")
+    try:
+      while True:
+        msg = await self.readMessage()
+        logger.debug(msg)
+        msgTag = msg[0:5]
         responseKey = msg[6]
-        if responseKey == IPP_ACK_CHAR:
-          await transaction.acknowledge()
-        elif responseKey == IPP_COMPLETE_CHAR:
-          await transaction.complete()
-        elif responseKey == IPP_DATE_CHAR:
-          await transaction.data(msg)
-        elif responseKey == IPP_ERROR_CHAR:
-          await transaction.error()
-
+        if msgTag in self.transactions:
+          logger.debug("%s in transactions dict" % msgTag)
+          transaction = self.transactions[msgTag]
+          if responseKey == IPP_ACK_CHAR:
+            await transaction.acknowledge()
+          elif responseKey == IPP_COMPLETE_CHAR:
+            await transaction.complete()
+          elif responseKey == IPP_DATA_CHAR:
+            await transaction.data(msg)
+          elif responseKey == IPP_ERROR_CHAR:
+            logger.debug("error callback")
+            await transaction.error(msg)
+        else:
+          logger.debug("%s NOT in transactions dict" % msgTag)
+    except StreamClosedError:
+      pass
 
   async def sendAndWait(self, command):
     tag = await self.sendCommand(command)
@@ -231,9 +348,8 @@ class Client:
     propsString = ", ".join(propArr)
     return await self.sendCommand("GetPropE(%s)" % propsString, isEvent=true, callbacks=callbacks)
 
-  async def SetProp(self, propArr, callbacks=None):
-    propsString = ", ".join(propArr)
-    return await self.sendCommand("SetProp(%s)" % propsString, callbacks=callbacks)
+  async def SetProp(self, setPropString, callbacks=None):
+    return await self.sendCommand("SetProp(%s)" % setPropString, callbacks=callbacks)
 
   
   async def EnumProp(self, pointerString, callbacks=None):
@@ -321,6 +437,9 @@ class Client:
     '''
     Move to a target position, including tool rotation
     '''
+    print(callbacks)
+    print(callbacks.error)
+    print(callbacks.complete)
     return await self.sendCommand("GoTo(%s)" % positionString, callbacks=callbacks)
 
   async def PtMeas(self, ptMeasString, callbacks=None):
@@ -362,7 +481,7 @@ class Client:
     '''
     Force the server to assume a given tool is the active tool
     '''
-    return await self.sendCommand("SetTool(%s)" % toolName, callbacks=callbacks)
+    return await self.sendCommand("SetTool(\"%s\")" % toolName, callbacks=callbacks)
 
   async def AlignTool(self, alignToolString, callbacks=None):
     '''
