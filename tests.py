@@ -2,7 +2,7 @@
 A set of test methods that perform a variety of measurements
 '''
 import sys
-from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, float3
+from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, futureWaitForCommandComplete, float3, CmmException
 import routines
 import asyncio
 from tornado.ioloop import IOLoop
@@ -10,6 +10,26 @@ from dataclasses import dataclass
 
 HOST = "10.0.0.1"
 PORT = 1294
+
+
+async def version():
+  try:
+    client = Client(HOST, PORT)
+    
+    await client.connect()
+
+    # await client.StartSession().complete()
+    await client.ClearAllErrors().complete()
+
+    getVersion = await client.GetDMEVersion().complete()
+    print(getVersion.data_list)
+
+    await client.EndSession().complete()
+    await client.disconnect()
+  except Exception as e:
+    print("Test 'version' failed, exception")
+    print(e)
+
 
 '''
 Ensure that the CMM is homed
@@ -22,20 +42,103 @@ Ensure that the CMM is homed
   Wait until confirmation CMM is homed, or quit upon error
 '''
 async def homing():
-  client = Client(HOST, PORT)
-  await client.connect()
-  messageHandler = asyncio.create_task(client.handleMessages())
-
-  await client.StartSession()
-  await client.ClearAllErrors()
-
-  print('waiting')
+  client = Client(HOST, PORT)  
+  if not await client.connect():
+    print("Failed to connect to server.")
+  
+  await client.StartSession().complete()
+  await client.ClearAllErrors().complete()
   await routines.ensureHomed(client)
-  print('finished')
 
-  await client.EndSession()
-  await asyncio.sleep(1)
+  await asyncio.sleep(3)
+  await client.EndSession().complete()
   await client.disconnect()
+
+
+async def pt():
+
+  client = Client(HOST, PORT)
+  
+  if not await client.connect():
+    print("Failed to connect to server.")
+
+  start = client.StartSession()
+  await start.send()
+  clearErrors = client.ClearAllErrors()
+  clearErrors.registerCallback("complete", )
+  task = clearErrors.complete()
+
+  setTool = client.SetTool("Component_3.1.50.4.A0.0-B0.0")
+  await setTool.complete()
+
+  getPos = client.Get("X(),Y(),Z()")
+  await getPos.complete()
+  data = getPos.data_list[0]
+  x = float(data[data.find("X(") + 2 : data.find("), Y")])
+  y = float(data[data.find("Y(") + 2 : data.find("), Z")])
+  z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
+  startPos = float3(x,y,z)
+
+  ptmeas = client.PtMeas("X(%s),Y(%s),Z(%s),IJK(0,0,1)" % (startPos.x,startPos.y,startPos.z))
+  await ptmeas.complete()
+  print(ptmeas.data_list)
+
+  
+  end = client.EndSession()
+  await end.complete()
+  await client.disconnect()
+
+
+async def exc():
+  client = Client(HOST, PORT)
+  try:
+    await client.connect()
+
+    print('waiting')
+    try:
+      # await client.GoTo("Z(0)")
+      r = await client.futureSendCommand(client.GoTo,"Z(0)")
+      r = await client.futureSendCommand(client.GoTo,"X(0)")
+      print("result %s" % r)
+    except CmmException as e:
+      print("Inner CmmExc %s" % e)
+    except Exception as e:
+      print("Inner Exc %s" % e)
+
+    await asyncio.sleep(1)
+    await client.disconnect()
+  except CmmException as e:
+    print("Outer CmmExc %s" % e)
+  except Exception as e:
+    print("Outer Exc %s" % e)
+    print(e)
+
+
+
+async def exc2():
+  client = Client(HOST, PORT)
+  try:
+    await client.connect()
+
+    print('waiting')
+    try:
+      # await client.GoTo("Z(0)")
+      cmds = [(client.GoTo, ["Z(0)"]),(client.GoTo, ["X(0)"])]
+      r = await client.sendCommandSequence(cmds)
+      print("result %s" % r)
+    except CmmException as e:
+      print("Inner CmmExc %s" % e)
+    except Exception as e:
+      print("Inner Exc %s" % e)
+
+    await asyncio.sleep(1)
+    await client.disconnect()
+  except CmmException as e:
+    print("Outer CmmExc %s" % e)
+  except Exception as e:
+    print("Outer Exc %s" % e)
+    print(e)
+
 
 
 '''
@@ -391,7 +494,6 @@ async def main():
   else:
     print("Running test %s" % selectedTest)
   
-  print(sys.argv[2:])
   if len(sys.argv) > 2:
     await globals()[sys.argv[1]](sys.argv[2:])
   else:

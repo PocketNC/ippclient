@@ -9,9 +9,13 @@ from tornado.tcpclient import TCPClient
 from tornado.iostream import StreamClosedError
 from dataclasses import dataclass
 import math
+import functools
+import traceback
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+RECEIVE_SIZE = 1024
 
 HOST = "10.0.0.1"
 PORT = 1294
@@ -20,7 +24,6 @@ IPP_ACK_CHAR = "&"
 IPP_COMPLETE_CHAR = "%"
 IPP_DATA_CHAR = "#"
 IPP_ERROR_CHAR = "!"
-
 
 status = 0
 
@@ -96,15 +99,45 @@ class float3:
       raise ValueError('The dot product requires another vector')
     return sum(a * b for a, b in zip(self, vector))
 
+async def readPointData(data):
+  logger.debug("read point data %s" % data)
+  x = float(data[data.find("X(") + 2 : data.find("), Y")])
+  y = float(data[data.find("Y(") + 2 : data.find("), Z")])
+  z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
+  pt = float3(x,y,z)
+  return pt
 
 async def noop(args=None):
   pass
 
 async def setEvent(event):
+  logger.debug("setting event")
   event.set()
 
 async def waitForEvent(event):
   await event.wait()
+
+def gotError():
+  raise CmmException()
+
+async def setFutureException(fut,msg):
+  logger.debug("setFutureException %s" % msg)
+  if not fut.done():
+    fut.set_exception(CmmException(msg))
+
+async def setFutureResult(fut,val):
+  if not fut.done():
+    fut.set_result(val)
+
+async def futureWaitForCommandComplete(cmd, *args):
+  loop = asyncio.get_running_loop()
+  fut = loop.create_future()
+  obj = {}
+  callbacks = TransactionCallbacks(complete=(lambda: setFutureResult(fut,obj)), error=(lambda: setFutureException(fut,"boo")))
+  await cmd(*args, callbacks=callbacks)
+  logger.debug("awaiting fut")
+  r = await fut
+  logger.debug("Future resolved %s" % r)
 
 async def waitForCommandComplete(cmd, *args, otherCallbacks=None):
   cmdCompleted = asyncio.Event()
@@ -118,8 +151,18 @@ async def waitForCommandComplete(cmd, *args, otherCallbacks=None):
   await cmd(*args, callbacks=callbacks)
   await waitTask
 
+
 class CmmException(Exception):
   pass
+class CmmExceptionUnexpectedCollision(CmmException):
+  pass
+class CmmExceptionErrorsPresent(CmmException):
+  pass
+class CmmExceptionAxisLimit(CmmException):
+  pass
+class CmmExceptionUnknownCommand(CmmException):
+  pass
+
 
 class TransactionStatus(Enum):
   ERROR = -1
@@ -128,55 +171,129 @@ class TransactionStatus(Enum):
   ACK = 2
   COMPLETE = 3
 
+
 class TransactionCallbacks:
-  def __init__(self, send=None, ack=None, complete=None, data=None, error=None):
-    self.send = send
-    self.ack = ack
-    self.complete = complete
+  # def __init__(self, send, ack, complete, data, error):
+  def __init__(self):
+    self.send = []
+    self.ack = []
+    self.complete = []
+    self.data = []
+    self.error = []
+
+
+class StandardTransactionCallbacks(TransactionCallbacks):
+  def __init__(self, future):
+    self.send = None
+    self.ack = None
+    self.complete = (lambda: setFutureResult(fut,data))
     self.data = data
-    self.error = error
+    self.error = (lambda msg: setFutureException(fut,msg))
+
+
+class Callbacks:
+  def __init__(self,transaction):
+    self.transaction = transaction
+
+  def send(self):
+    self.transaction.status = TransactionStatus.SENT
+    if self.transaction.custom_callbacks.send is not None:
+      self.transaction.custom_callbacks.send()
+
+  def ack(self):
+    self.transaction.status = TransactionStatus.ACK
+
+  def data(self):
+    self.transaction.data = TransactionStatus.SENT
+
+  def error(self):
+    self.transaction.error = TransactionStatus.ERROR
+
+  def complete(self):
+    self.transaction.complete = TransactionStatus.COMPLETE
+
 
 class Transaction:
-  def __init__(self, callbacks=TransactionCallbacks()):
+  def __init__(self, tag, cmd):
     self.status = TransactionStatus.CREATED
-    self.dataList = []
-    self.errorList = []
-    self.callbacks = callbacks
+    self.tag = tag
+    self.data_list = []
+    self.error_list = []
+    self.futures = {}
+    self.sendTask = None
+    self.command = cmd
+    self.callbacks = TransactionCallbacks()
 
-  async def send(self):
+  def register_callback(self, event, callback, once):
+    try:
+      getattr(self.callbacks, event).append({'callback': callback, 'once': once})
+    except AttributeError as err:
+      return err
+
+  def clear_callbacks(self, event=None):
+    if event is not None:
+      setattr(self.callbacks, event, [])
+    else:
+      self.callbacks = TransactionCallbacks()
+
+  def _std_event_callback(self, key):
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    def callback(transaction):
+      fut.set_result(transaction)
+    self.register_callback(key, callback, True)
+    return fut
+
+  def _process_event_callbacks(self, event):
+    logger.debug('processing callbacks for %s', event )
+    eventCallbacks = getattr(self.callbacks, event)
+    logger.debug(eventCallbacks)
+    repeatCallbacks = []
+    for cb in eventCallbacks:
+      logger.debug(cb)
+      func = cb['callback']
+      func(self)
+      if not cb['once']:
+        repeatCallbacks.append(cb)
+    setattr(self.callbacks, event, repeatCallbacks)
+
+  def send(self):
+    return self._std_event_callback("send")
+
+  def ack(self):
+    return self._std_event_callback("ack")
+
+  def complete(self):
+    return self._std_event_callback("complete")
+
+  def data(self):
+    return self._std_event_callback("data")
+
+  def error(self):
+    return self._std_event_callback("error")
+
+  def handle_send(self):
     self.status = TransactionStatus.SENT
-    if self.callbacks.send:
-      await self.callbacks.send()
+    self._process_event_callbacks('send')
 
-  async def acknowledge(self):
+  def handle_ack(self):
     self.status = TransactionStatus.ACK
-    if self.callbacks.ack:
-      await self.callbacks.ack()
+    self._process_event_callbacks('ack')
 
-  async def data(self, data):
-    logger.debug(self.callbacks.data)
-    logger.debug(data)
-    self.dataList.append(data)
-    if self.callbacks.data:
-      logger.debug('data callback')
-      await self.callbacks.data(data)
-      logger.debug('data callback end')
+  def handle_data(self, data_msg):
+    self.data_list.append(data_msg)
+    self._process_event_callbacks('data')
 
-  async def error(self, err):
-    logger.debug("in error: %s" % err)
-    self.errorList.append(err)
-    if self.callbacks.error:
-      logger.debug('error callback')
-      await self.callbacks.error(err)
-      logger.debug('error callback end')
+  def handle_error(self, err_msg):
+    self.status = TransactionStatus.ERROR
+    self.error_list.append(err_msg)
+    self._process_event_callbacks('error')
 
-  async def complete(self):
+  def handle_complete(self):
     self.status = TransactionStatus.COMPLETE
-    if self.callbacks.complete:
-      await self.callbacks.complete()
+    self._process_event_callbacks('complete')
 
 
-RECEIVE_SIZE = 1024
 class Client:
   def __init__(self, host=HOST, port=PORT):
     self.host = host
@@ -188,25 +305,31 @@ class Client:
     self.transactions = {}
     self.events = {}
     self.buffer = ""
+    self.points = []
 
   async def connect(self):
     try:
-      self.stream = await self.tcpClient.connect(self.host, self.port)
+      logger.debug('connecting')
+      self.stream = await asyncio.wait_for(self.tcpClient.connect(self.host, self.port), timeout=3.0)
+      logger.debug('connected')
+      
+      self.listenerTask = asyncio.create_task(self.handleMessages())
+      await self.StartSession().complete()
       return True
     except Exception as e:
-      logger.error("connect error: %s", e)
-      return False
+      logger.error("connect error %s", traceback.format_exc())
+      raise e
 
   async def disconnect(self):
     try:
       if self.stream is not None:
         self.stream.close()
     except Exception as e:
-      logger.error("disconnect error: %s", e)
+      logger.error("disconnect error %s", traceback.format_exc())
+      raise e
 
-  async def sendCommand(self, command, isEvent=False, callbacks=None):
-    logger.debug("Send I++ command %s ", command)
-    
+  def sendCommand(self, command, isEvent=False):
+    logger.debug("sendCommand %s ", command)
     try:
       if isEvent:
         tagNum = self.nextEventTagNum
@@ -214,42 +337,32 @@ class Client:
         self.nextEventTagNum = self.nextEventTagNum%9999+1 # Get the next event tag between 1 - 9999
       else:
         tagNum = self.nextTagNum
-        tag = "%05d" % tagNum
+        tag = "%05d" % tagNum 
         self.nextTagNum = self.nextTagNum%99999+1 # Get the next tag between 1 - 99999
-
-      transaction = Transaction() if callbacks is None else Transaction(callbacks)
+        
+      transaction = Transaction(tag, command)
       self.transactions[tag] = transaction
-      message = "%s %s\r\n" % (tag, command)
-
-      await self.stream.write(message.encode('ascii'))
-      await transaction.send()
-      return tag
+      
+      transaction.sendTask = asyncio.create_task(self._coro_send_command(transaction))
+      return transaction
     except Exception as e:
       logger.error(e)
+      raise e
 
-  # Might be removing this, sendCommand now can handle either normal or event commands
-  async def sendEventCommand(self, command):
-    '''
-    Event Commands go into the Fast Queue
-    '''
+  async def _coro_send_command(self, transaction):
+    message = "%s %s\r\n" % (transaction.tag, transaction.command)
     try:
-      logger.debug("Send I++ event-command %s ", command)
-      eventTagNum = self.nextEventTag
-      eventTag = "E%04d" % eventTagNum
-      transaction = Transaction()
-      self.transactions[eventTag] = transaction
-      message = "%s %s\r\n" % (eventTag, command)
-      self.nextEventTag = eventTagNum%9999+1 # Get the next eventTag between 1 - 9999
-      await self.tcpClient.send_message(message.encode('ascii'))
-      transaction.send()
-      return eventTag
-    except Exception as e:
-      logger.error(e)
+      await asyncio.wait_for(self.stream.write(message.encode('ascii')), timeout=3.0)
+    except asyncio.TimeoutError as e:
+      logger.debug("Timeout!")
+      loop = asyncio.get_running_loop()
+      loop.stop()
+      raise e
+    transaction.handle_send()
 
   async def readMessage(self):
     msg = await self.stream.read_until(b"\r\n")
     msg = msg.decode("ascii")
-    logger.debug("Rcv msg: %s", msg)
     return msg
 
   async def handleMessages(self, stopTag=None, stopKey=None):
@@ -260,160 +373,139 @@ class Client:
     try:
       while True:
         msg = await self.readMessage()
-        logger.debug(msg)
+        logger.debug("handleMessage: %s" % msg)
         msgTag = msg[0:5]
         responseKey = msg[6]
         if msgTag in self.transactions:
-          logger.debug("%s in transactions dict" % msgTag)
+          logger.debug("%s is in transactions dict" % msgTag)
           transaction = self.transactions[msgTag]
           if responseKey == IPP_ACK_CHAR:
-            await transaction.acknowledge()
+            logger.debug('handle ack')
+            transaction.handle_ack()
           elif responseKey == IPP_COMPLETE_CHAR:
-            await transaction.complete()
+            logger.debug('handle complete')
+            transaction.handle_complete()
           elif responseKey == IPP_DATA_CHAR:
-            await transaction.data(msg)
+            logger.debug('handle data')
+            transaction.handle_data(msg)
           elif responseKey == IPP_ERROR_CHAR:
-            logger.debug("error callback")
-            await transaction.error(msg)
+            logger.debug("calling error")
+            transaction.handle_error(msg)
         else:
           logger.debug("%s NOT in transactions dict" % msgTag)
     except StreamClosedError:
       pass
 
-  async def sendAndWait(self, command):
-    tag = await self.sendCommand(command)
-    while True:
-      msg = await self.handleMessage()
-      if ("%s %%" % (tag)) in msg:
-        logger.debug("Transaction Complete")
-        break
-
-  async def eventSendAndWait(self, command):
-    tag = await self.sendEventCommand(command)
-    while True:
-      msg = await self.handleMessage()
-      if ("%s %%" % (tag)) in msg:
-        logger.debug("Transaction Complete")
-        break
-
-  async def commandSequence(self, cmdArr ):
-    for cmd in cmdArr:
-      await self.sendCommand(cmd)
-
-  async def sendCommandWithCallbacks(self, cmd):
-    cmdFn = getattr(self, cmd, None)
-    if cmdFn is not None:
-      await cmdFn()
 
 
   '''
   I++ Server Methods
   '''
-  async def StartSession(self, callbacks=None):
-    await self.sendCommand("EndSession()")
-    return await self.sendCommand("StartSession()", callbacks=callbacks)
+  def StartSession(self):
+    self.sendCommand("EndSession()")
+    return self.sendCommand("StartSession()")
 
-  async def EndSession(self, callbacks=None):
-    endTag = await self.sendCommand("EndSession()", callbacks=callbacks)
+  def EndSession(self):
+    endTransaction = self.sendCommand("EndSession()")
     self.nextTag = 1
     self.nextEventTag = 1
-    return endTag
+    return endTransaction
 
-  async def StopDaemon(self, eventTag, callbacks=None):
-    return await self.sendCommand("StopDaemon(%s)" % eventTag, callbacks=callbacks)
+  def StopDaemon(self, eventTag):
+    return self.sendCommand("StopDaemon(%s)" % eventTag)
 
-  async def StopAllDaemons(self, callbacks=None):
-    return await self.sendCommand("StopAllDaemons()", callbacks=callbacks)
+  def StopAllDaemons(self):
+    return self.sendCommand("StopAllDaemons()")
 
-  async def AbortE(self, callbacks=None):
+  def AbortE(self):
     '''
     Fast Queue command
     '''
-    return await self.sendCommand("AbortE()", isEvent=True, callbacks=callbacks)
+    return self.sendCommand("AbortE()", isEvent=True)
 
-  async def GetErrorInfo(self, errNum=None, callbacks=None):
-    return await self.sendCommand("GetErrorInfo(%s)" % str(errNum or ''), callbacks=callbacks)
+  def GetErrorInfo(self, errNum=None):
+    return self.sendCommand("GetErrorInfo(%s)" % str(errNum or ''))
 
-  async def ClearAllErrors(self, callbacks=None):
-    return await self.sendCommand("ClearAllErrors()", callbacks=callbacks)
+  def ClearAllErrors(self):
+    return self.sendCommand("ClearAllErrors()")
 
-  async def GetProp(self, propArr, callbacks=None):
+  def GetProp(self, propArr):
     propsString = ", ".join(propArr)
-    return await self.sendCommand("GetProp(%s)" % propsString, callbacks=callbacks)
+    return self.sendCommand("GetProp(%s)" % propsString)
 
-  async def GetPropE(self, propArr, callbacks=None):
+  def GetPropE(self, propArr):
     '''
     Fast Queue command
     '''
     propsString = ", ".join(propArr)
-    return await self.sendCommand("GetPropE(%s)" % propsString, isEvent=true, callbacks=callbacks)
+    return self.sendCommand("GetPropE(%s)" % propsString, isEvent=true)
 
-  async def SetProp(self, setPropString, callbacks=None):
-    return await self.sendCommand("SetProp(%s)" % setPropString, callbacks=callbacks)
-
+  def SetProp(self, setPropString):
+    return self.sendCommand("SetProp(%s)" % setPropString)
   
-  async def EnumProp(self, pointerString, callbacks=None):
+  def EnumProp(self, pointerString):
     '''
     Get the list of properties for a system object
     For example, "EnumProp(Tool.PtMeasPar())" will return 
     the active tool's PtMeas properties list
     '''
-    return await self.sendCommand("EnumProp(%s)" % pointerString, callbacks=callbacks)
+    return self.sendCommand("EnumProp(%s)" % pointerString)
 
-  async def EnumAllProp(self, pointerString, callbacks=None):
+  def EnumAllProp(self, pointerString):
     '''
     Get the entire tree of properties and sub-properties for a system object
     '''
-    return await self.sendCommand("EnumAllProp(%s)" % pointerString, callbacks=callbacks)
+    return self.sendCommand("EnumAllProp(%s)" % pointerString)
 
-  async def GetDMEVersion(self, callbacks=None):
-    return await self.sendCommand("GetDMEVersion()", callbacks=callbacks)
+  def GetDMEVersion(self):
+    return self.sendCommand("GetDMEVersion()")
+
 
 
   '''
   I++ DME Methods
   '''
-  async def Home(self, callbacks=None):
-    return await self.sendCommand("Home()", callbacks=callbacks)
+  def Home(self):
+    return self.sendCommand("Home()")
 
-  async def IsHomed(self, callbacks=None):
-    return await self.sendCommand("IsHomed()", callbacks=callbacks)
+  def IsHomed(self):
+    return self.sendCommand("IsHomed()")
 
-  async def EnableUser(self, callbacks=None):
-    return await self.sendCommand("EnableUser()", callbacks=callbacks)
+  def EnableUser(self):
+    return self.sendCommand("EnableUser()")
 
-  async def DisableUser(self, callbacks=None):
-    return await self.sendCommand("DisableUser()", callbacks=callbacks)
+  def DisableUser(self):
+    return self.sendCommand("DisableUser()")
 
-  async def IsUserEnabled(self, callbacks=None):
-    return await self.sendCommand("IsUserEnabled()", callbacks=callbacks)
+  def IsUserEnabled(self):
+    return self.sendCommand("IsUserEnabled()")
 
-  async def OnPtMeasReport(self, ptMeasFormatString, callbacks=None):
+  def OnPtMeasReport(self, ptMeasFormatString):
     '''
     Define the information reported in the result of a PtMeas command
     '''
-    return await self.sendCommand("OnPtMeasReport(%s)" % ptMeasFormatString, callbacks=callbacks)
+    return self.sendCommand("OnPtMeasReport(%s)" % ptMeasFormatString)
 
-  async def OnMoveReportE(self, onMoveReportFormatString, callbacks=None):
+  def OnMoveReportE(self, onMoveReportFormatString):
     '''
     Fast Queue command
     Start a daemon that reports machine movement, and define
     which information is sent (sequence and contents)
     '''
-    return await self.sendCommand("OnMoveReportE(%s)" % onMoveReportFormatString, isEvent=True, callbacks=callbacks)
+    return self.sendCommand("OnMoveReportE(%s)" % onMoveReportFormatString, isEvent=True)
 
-  async def GetMachineClass(self, callbacks=None):
-    return await self.sendCommand("GetMachineClass()", callbacks=callbacks)
+  def GetMachineClass(self):
+    return self.sendCommand("GetMachineClass()")
 
-  async def GetErrStatusE(self, callbacks=None):
+  def GetErrStatusE(self):
     '''
     Fast Queue command
     Response is "ErrStatus(1)" if in error
     Response is "ErrStatus(0)" if ok
     '''
-    return await self.sendCommand("GetErrStatusE()", isEvent=true, callbacks=callbacks)
+    return self.sendCommand("GetErrStatusE()", isEvent=true)
 
-  async def GetXtdErrStatus(self, callbacks=None):
+  def GetXtdErrStatus(self):
     '''
     Response is one or more lines of status information
     Could also include one or more errors
@@ -423,249 +515,282 @@ class Client:
       1009: Air Pressure Out Of Range
       0512: No Daemons Are Active.
     '''
-    return await self.sendCommand("GetXtdErrStatus()", callbacks=callbacks)
+    return self.sendCommand("GetXtdErrStatus()")
 
-  async def Get(self, queryString, callbacks=None):
+  def Get(self, queryString):
     '''
     Query tool position
     queryString example:
       "X(), Y(), Z(), Tool.A(), Tool.B()"
     '''
-    return await self.sendCommand("Get(%s)" % queryString, callbacks=callbacks)
+    return self.sendCommand("Get(%s)" % queryString)
 
-  async def GoTo(self, positionString, callbacks=None):
+  def GoToFuture(self, positionString):
     '''
     Move to a target position, including tool rotation
     '''
-    print(callbacks)
-    print(callbacks.error)
-    print(callbacks.complete)
-    return await self.sendCommand("GoTo(%s)" % positionString, callbacks=callbacks)
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    fut.add_done_callback(functools .partial(print, "Future:"))
+    callbacks = TransactionCallbacks(complete=(lambda: setFutureResult(fut,"yay")), error=(lambda: setFutureException(fut,"boo")))
+    return fut
 
-  async def PtMeas(self, ptMeasString, callbacks=None):
+  def GoToTask(self, positionString):
+    '''
+    Move to a target position, including tool rotation
+    '''
+    # loop = asyncio.get_running_loop()
+    # fut = loop.create_future()
+    # fut.add_done_callback(functools.partial(print, "Future:"))
+    # callbacks = TransactionCallbacks(complete=(lambda: setFutureResult(fut,"yay")), error=(lambda: setFutureException(fut,"boo")))
+    logger.debug("GoTo cb %s" % callbacks.error)
+    task = asyncio.create_task(self.sendCommand("GoTo(%s" % positionString))
+    return task
+
+  def GoTo(self, positionString):
+    '''
+    Move to a target position, including tool rotation
+    '''
+    # loop = asyncio.get_running_loop()
+    # fut = loop.create_future()
+    # fut.add_done_callback(functools.partial(print, "Future:"))
+    logger.debug("GoTo cb %s" % callbacks.error)
+    return self.sendCommand("GoTo(%s)" % positionString)
+
+
+  async def sendPtMeas(self, ptMeasString):
+    await self.sendCommand("PtMeas(%s)" % ptMeasString)
+
+
+  def PtMeas(self, ptMeasString):
     '''
     Execute a single point measurement
     Necessary parameters are defined by the active tool
     Return format is set by OnPtMeasReport
     Errors if surface not found (Error 1006: Surface not Found)
     '''
-    return await self.sendCommand("PtMeas(%s)" % ptMeasString, callbacks=callbacks)
+    cmdString = "PtMeas(%s)" % ptMeasString
+    return self.sendCommand(cmdString)
 
   # See examples 7.6 and 7.7 in IDME specification for tool handling examples
-  async def Tool(self, callbacks=None):
+  def Tool(self):
     '''
     Select a pointer to the active tool
     '''
-    return await self.sendCommand("Tool()", callbacks=callbacks)
+    return self.sendCommand("Tool()")
 
-  async def FindTool(self, toolName, callbacks=None):
+  def FindTool(self, toolName):
     '''
     Select a pointer to a tool with a known name
     '''
-    return await self.sendCommand("FindTool(%s)" % toolName, callbacks=callbacks)
+    return self.sendCommand("FindTool(%s)" % toolName)
   
-  async def FoundTool(self, callbacks=None):
+  def FoundTool(self):
     '''
     Acts as pointer to tool selected by FindTool command
     Default pointer is "UnDefTool" 
     '''
-    return await self.sendCommand("FoundTool()", callbacks=callbacks)
+    return self.sendCommand("FoundTool()")
 
-  async def ChangeTool(self, toolName, callbacks=None):
+  def ChangeTool(self, toolName):
     '''
     Perform a tool change
     '''
-    return await self.sendCommand("ChangeTool(%s)" % toolName, callbacks=callbacks)
+    return self.sendCommand("ChangeTool(%s)" % toolName)
 
-  async def SetTool(self, toolName, callbacks=None):
+  def SetTool(self, toolName):
     '''
     Force the server to assume a given tool is the active tool
     '''
-    return await self.sendCommand("SetTool(\"%s\")" % toolName, callbacks=callbacks)
+    return self.sendCommand("SetTool(\"%s\")" % toolName)
 
-  async def AlignTool(self, alignToolString, callbacks=None):
+  def AlignTool(self, alignToolString):
     '''
     Orientate an alignable tool
     '''
-    return await self.sendCommand("AlignTool(%s)" % alignToolString, callbacks=callbacks)
+    return self.sendCommand("AlignTool(%s)" % alignToolString)
 
-  async def GoToPar(self, callbacks=None):
+  def GoToPar(self):
     '''
     This method acts as a pointer to the GoToParameter block of the DME
     '''
-    return await self.sendCommand("GoToPar()", callbacks=callbacks)
+    return self.sendCommand("GoToPar()")
 
-  async def PrMeasPar(self, callbacks=None):
+  def PrMeasPar(self):
     '''
     This method acts as a pointer to the PtMeasParameter block of the DME
     '''
-    return await self.sendCommand("PtMeasPar()", callbacks=callbacks)
+    return self.sendCommand("PtMeasPar()")
 
-  async def EnumTools(self, callbacks=None):
+  def EnumTools(self):
     '''
     Returns a list of the names of available tools
     '''
-    return await self.sendCommand("enumTools()", callbacks=callbacks)
+    return self.sendCommand("enumTools()")
 
-  async def GetChangeToolAction(self, toolName, callbacks=None):
+  def GetChangeToolAction(self, toolName):
     '''
     Query the necessary movement to change to a given tool
     '''
-    return await self.sendCommand("GetChangeToolAction(%s)" % toolName, callbacks=callbacks)
+    return self.sendCommand("GetChangeToolAction(%s)" % toolName)
 
-  async def EnumToolCollection(self, collectionName, callbacks=None):
+  def EnumToolCollection(self, collectionName):
     '''
     Query the names and types of tools (or child collections) belonging to a collection
     '''
-    return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
+    return self.sendCommand("EnumToolCollection(%s)" % collectionName)
 
-  async def EnumAllToolCollections(self, collectionName, callbacks=None):
+  def EnumAllToolCollections(self, collectionName):
     '''
     Recursively return all tools and sub-collections to this collection
     '''
-    return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
+    return self.sendCommand("EnumToolCollection(%s)" % collectionName)
 
-  async def OpenToolCollection(self, collectionName, callbacks=None):
+  def OpenToolCollection(self, collectionName):
     '''
     Make all tools in referenced collection visible, meaning a ChangeTool command can
     directly use names in the collection without a path extension
     '''
-    return await self.sendCommand("EnumToolCollection(%s)" % collectionName, callbacks=callbacks)
+    return self.sendCommand("EnumToolCollection(%s)" % collectionName)
 
-  async def IjkAct(self, callbacks=None):
+  def IjkAct(self):
     '''
     Query the meaning of server IJK() values: actual measured normal, nominal, or tool alignment
     '''
-    return await self.sendCommand("IJKAct()", callbacks=callbacks)
+    return self.sendCommand("IJKAct()")
 
-  async def PtMeasSelfCenter(self, ptMeasSelfCenterString, callbacks=None):
+  def PtMeasSelfCenter(self, ptMeasSelfCenterString):
     '''
     Execute a single point measurement by self-centering probing
     Necessary parameters defined by the active tool
     '''
-    return await self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString, callbacks=callbacks)
+    return self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString)
 
-  async def PtMeasSelfCenterLocked(self, ptMeasSelfCenterString, callbacks=None):
+  def PtMeasSelfCenterLocked(self, ptMeasSelfCenterString):
     '''
     Execute a single point measurement by self-centering probing
     without leaving a plane defined by params
     Necessary parameters defined by the active tool
     '''
-    return await self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString, callbacks=callbacks)
+    return self.sendCommand("PtMeasSelfCenter(%s)" % ptMeasSelfCenterString)
 
-  async def ReadAllTemperatures(self, callbacks=None):
-    return await self.sendCommand("ReadAllTemperatures()", callbacks=callbacks)
+  def ReadAllTemperatures(self):
+    return self.sendCommand("ReadAllTemperatures()")
+
 
 
   '''
   I++ CartCMM Methods
   '''
-  async def SetCoordSystem(self, coodSystemString, callbacks=None):
+  def SetCoordSystem(self, coodSystemString):
     '''
     Arg is one of: MachineCsy, MoveableMachineCsy, MultipleArmCsy, RotaryTableVarCsy, PartCsy
     '''
-    return await self.sendCommand("SetCoordSystem(%s)" % coodSystemString, callbacks=callbacks)
+    return self.sendCommand("SetCoordSystem(%s)" % coodSystemString)
 
-  async def GetCoordSystem(self, callbacks=None):
+  def GetCoordSystem(self):
     '''
     Query which coord sys is selected
     '''
-    return await self.sendCommand("GetCoordSystem()", callbacks=callbacks)
+    return self.sendCommand("GetCoordSystem()")
 
-  async def GetCsyTransformation(self, getCsyTransformationString, callbacks=None):
-    return await self.sendCommand("GetCsyTransformation(%s)" % getCsyTransformationString, callbacks=callbacks)
+  def GetCsyTransformation(self, getCsyTransformationString):
+    return self.sendCommand("GetCsyTransformation(%s)" % getCsyTransformationString)
 
-  async def SetCsyTransformation(self, setCsyTransformationString, callbacks=None):
-    return await self.sendCommand("SetCsyTransformation(%s)" % setCsyTransformationString, callbacks=callbacks)
+  def SetCsyTransformation(self, setCsyTransformationString):
+    return self.sendCommand("SetCsyTransformation(%s)" % setCsyTransformationString)
 
-  async def SaveActiveCoordSystem(self, csyName, callbacks=None):
-    return await self.sendCommand("SaveActiveCoordSystem(%s)" % csyName, callbacks=callbacks)
+  def SaveActiveCoordSystem(self, csyName):
+    return self.sendCommand("SaveActiveCoordSystem(%s)" % csyName)
 
-  async def LoadCoordSystem(self, csyName, callbacks=None):
-    return await self.sendCommand("LoadCoordSystem(%s)" % csyName, callbacks=callbacks)
+  def LoadCoordSystem(self, csyName):
+    return self.sendCommand("LoadCoordSystem(%s)" % csyName)
     
-  async def DeleteCoordSystem(self, csyName, callbacks=None):
-    return await self.sendCommand("DeleteCoordSystem(%s)" % csyName, callbacks=callbacks)
+  def DeleteCoordSystem(self, csyName):
+    return self.sendCommand("DeleteCoordSystem(%s)" % csyName)
 
-  async def EnumCoordSystem(self, name, callbacks=None):
-    return await self.sendCommand("EnumCoordSystem()", callbacks=callbacks)
+  def EnumCoordSystem(self, name):
+    return self.sendCommand("EnumCoordSystem()")
 
-  async def GetNamedCsyTransformation(self, csyName, callbacks=None):
-    return await self.sendCommand("GetNamedCsyTransformation(%s)" % csyName, callbacks=callbacks)
+  def GetNamedCsyTransformation(self, csyName):
+    return self.sendCommand("GetNamedCsyTransformation(%s)" % csyName)
   
-  async def SaveNamedCsyTransformation(self, csyName, csyCoordsString, callbacks=None):
-    return await self.sendCommand("SaveNamedCsyTransformation(%s, %s)" % (csyName, csyCoordsStsring), callbacks=callbacks)
+  def SaveNamedCsyTransformation(self, csyName, csyCoordsString):
+    return self.sendCommand("SaveNamedCsyTransformation(%s, %s)" % (csyName, csyCoordsStsring))
+
 
 
   '''
   I++ Tool Methods
   '''
-  async def ReQualify(self, callbacks=None):
+  def ReQualify(self):
     '''
     Requalify active tool
     '''
-    return await self.sendCommand("ReQualify()", callbacks=callbacks)
+    return self.sendCommand("ReQualify()")
 
-  async def ScanPar(self, callbacks=None):
+  def ScanPar(self):
     '''
     Acts as a pointer to the ScanParameter block of KTool instance
     '''
-    return await self.sendCommand("ScanPar()", callbacks=callbacks)
+    return self.sendCommand("ScanPar()")
 
-  async def AvrRadius(self, callbacks=None):
+  def AvrRadius(self):
     '''
     Return average tip radius of selected tool
     '''
-    return await self.sendCommand("AvrRadius()", callbacks=callbacks)
+    return self.sendCommand("AvrRadius()")
 
-  async def IsAlignable(self, callbacks=None):
+  def IsAlignable(self):
     '''
     Query if selected tool is alignable
     '''
-    return await self.sendCommand("IsAlignable()", callbacks=callbacks)
+    return self.sendCommand("IsAlignable()")
 
-  async def Alignment(self, alignmentVectorString, callbacks=None):
+  def Alignment(self, alignmentVectorString):
     '''
     Query if selected tool is alignable
     '''
-    return await self.sendCommand("Alignment(%s)" % alignmentVectorString, callbacks=callbacks)
+    return self.sendCommand("Alignment(%s)" % alignmentVectorString)
 
-  async def CalcToolAlignment(self, calcToolAlignmentString, callbacks=None):
+  def CalcToolAlignment(self, calcToolAlignmentString):
     '''
     Query the alignment of selected tool
     '''
-    return await self.sendCommand("CalcToolAlignment(%s)" % calcToolAlignmentString, callbacks=callbacks)
+    return self.sendCommand("CalcToolAlignment(%s)" % calcToolAlignmentString)
 
-  async def CalcToolAngles(self, calcToolAnglesString, callbacks=None):
+  def CalcToolAngles(self, calcToolAnglesString):
     '''
     Query the alignment of selected tool
     '''
-    return await self.sendCommand("CalcToolAngles(%s)" % calcToolAnglesString, callbacks=callbacks)
+    return self.sendCommand("CalcToolAngles(%s)" % calcToolAnglesString)
 
-  async def UseSmallestAngleToAlignTool(self, enabled, callbacks=None):
+  def UseSmallestAngleToAlignTool(self, enabled):
     '''
     Param is 0 or 1
     When enabled with CalcToolAngles(1), attempting to rotate the tool by
     180 degrees or more will produce an error
     '''
-    return await self.sendCommand("CalcToolAngles(%s)" % calcToolAnglesString, callbacks=callbacks)
+    return self.sendCommand("CalcToolAngles(%s)" % calcToolAnglesString)
+
+
 
   '''
   I++ Scanning Methods
   '''
-  async def OnScanReport(self, onScanReportString, callbacks=None):
+  def OnScanReport(self, onScanReportString):
     '''
     Define the format of scan reports
     '''
-    return await self.sendCommand("OnScanReport(%s)" % onScanReportString, callbacks=callbacks)
+    return self.sendCommand("OnScanReport(%s)" % onScanReportString)
 
-  async def ScanOnCircleHint(self, displacement, form, callbacks=None):
+  def ScanOnCircleHint(self, displacement, form):
     '''
     Optimize ScanOnCircle execution by defining expected deviation from nominal of the measured circle
     '''
-    return await self.sendCommand("ScanOnCircleHint(%s, %s)" % (displacement, form), callbacks=callbacks)
+    return self.sendCommand("ScanOnCircleHint(%s, %s)" % (displacement, form))
 
-  async def ScanOnCircle(self, scanOnCircleString, callbacks=None):
+  def ScanOnCircle(self, scanOnCircleString):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW)
@@ -676,15 +801,15 @@ class Client:
       sfa        is the surface angle of the circle
       StepW      average angular distance between 2 measured points in degrees.
     '''
-    return await self.sendCommand("ScanOnCircle(%s)" % (scanOnCircleString), callbacks=callbacks)
+    return self.sendCommand("ScanOnCircle(%s)" % (scanOnCircleString))
 
-  async def ScanOnLineHint(self, angle, form, callbacks=None):
+  def ScanOnLineHint(self, angle, form):
     '''
     Optimize ScanOnLine execution by defining expected deviation from nominal of the measured line
     '''
-    return await self.sendCommand("ScanOnLineHint(%s, %s)" % (angle, form), callbacks=callbacks)
+    return self.sendCommand("ScanOnLineHint(%s, %s)" % (angle, form))
 
-  async def ScanOnLine(self, scanOnLineString, callbacks=None):
+  def ScanOnLine(self, scanOnLineString):
     '''
     Perform a scanning measurement on a circular 
     Parameters: (Sx,Sy,Sz,Ex,Ey,Ez,i,j,k,StepW)
@@ -693,15 +818,15 @@ class Client:
       i,j,k      is the surface normal vector on the line
       StepW      average distance between 2 measured points in mm
     '''
-    return await self.sendCommand("ScanOnLine(%s)" % (scanOnLineString), callbacks=callbacks)
+    return self.sendCommand("ScanOnLine(%s)" % (scanOnLineString))
 
-  async def ScanOnCurveHint(self, deviation, minRadiusOfCurvature, callbacks=None):
+  def ScanOnCurveHint(self, deviation, minRadiusOfCurvature):
     '''
     Optimize ScanOnCurve execution by defining expected deviation from nominal of the measured curve
     '''
-    return await self.sendCommand("ScanOnCurveHint(%s, %s)" % (deviation, minRadiusOfCurvature), callbacks=callbacks)
+    return self.sendCommand("ScanOnCurveHint(%s, %s)" % (deviation, minRadiusOfCurvature))
   
-  async def ScanOnCurveDensity(self, scanOnCurveDensityString, callbacks=None):
+  def ScanOnCurveDensity(self, scanOnCurveDensityString):
     '''
     Define density of points returned from server by ScanOnCurve execution
     Parameters: (Dis(),Angle(),AngleBaseLength(),AtNominals())
@@ -712,9 +837,9 @@ class Client:
       
       Dis() or/and AtNominals() without Angle() and AngleBaseLength() also possible.
     '''
-    return await self.sendCommand("ScanOnCurveDensity(%s)" % (scanOnCurveDensityString), callbacks=callbacks)
+    return self.sendCommand("ScanOnCurveDensity(%s)" % (scanOnCurveDensityString))
 
-  async def ScanOnCurve(self, scanOnCurveString, callbacks=None):
+  def ScanOnCurve(self, scanOnCurveString):
     '''
     Perform a scanning measurement along a curve
     Parameters: ( 
@@ -741,9 +866,9 @@ class Client:
         [pin,pjn,pkn] Optional data for nominal primary tool direction
         [sin,sjn,skn] Optional data for nominal secondary tool direction
     '''
-    return await self.sendCommand("ScanOnCurve(%s)" % (scanOnCurveString), callbacks=callbacks)
+    return self.sendCommand("ScanOnCurve(%s)" % (scanOnCurveString))
 
-  async def ScanOnHelix(self, scanOnHelixString, callbacks=None):
+  def ScanOnHelix(self, scanOnHelixString):
     '''
     Perform a scanning measurement along a helical path
     Parameters: (Cx, Cy, Cz, Sx, Sy, Sz, i, j, k, delta, sfa, StepW, pitch)
@@ -755,15 +880,15 @@ class Client:
       StepW      average angular distance between 2 measured points in degrees.
       lead       is the lead in mm per 360 degrees rotation
     '''
-    return await self.sendCommand("ScanOnHelix(%s)" % (scanOnHelixString), callbacks=callbacks)
+    return self.sendCommand("ScanOnHelix(%s)" % (scanOnHelixString))
 
-  async def ScanUnknownHint(self, minRadiusOfCurvature, callbacks=None):
+  def ScanUnknownHint(self, minRadiusOfCurvature):
     '''
     Define expected minimum radius of curvature during scan of unknown contour
     '''
-    return await self.sendCommand("ScanUnknownHint(%s)" % (minRadiusOfCurvature), callbacks=callbacks)
+    return self.sendCommand("ScanUnknownHint(%s)" % (minRadiusOfCurvature))
 
-  async def ScanUnknownDensity(self, scanUnknownDensityString, callbacks=None):
+  def ScanUnknownDensity(self, scanUnknownDensityString):
       '''
       Define density of points returned from server by ScanUnknown execution
       Parameters: (Dis(),Angle(),AngleBaseLength())
@@ -773,9 +898,9 @@ class Client:
 
         Dis() without Angle() and AngleBaseLength() possible.
       '''
-      return await self.sendCommand("ScanUnknownDensity(%s)" % (scanUnknownDensityString), callbacks=callbacks)
+      return self.sendCommand("ScanUnknownDensity(%s)" % (scanUnknownDensityString))
 
-  async def ScanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString, callbacks=None):
+  def ScanInPlaneEndIsSphere(self, scanInPlaneEndIsSphereString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -790,9 +915,9 @@ class Client:
       n           Number of reaching the stop sphere
       Ei, Ej, Ek  defines the surface direction at the end point. It defines the direction for retracting
     '''
-    return await self.sendCommand("ScanInPlaneEndIsSphere(%s)" % (scanInPlaneEndIsSphereString), callbacks=callbacks)
+    return self.sendCommand("ScanInPlaneEndIsSphere(%s)" % (scanInPlaneEndIsSphereString))
 
-  async def ScanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString, callbacks=None):
+  def ScanInPlaneEndIsPlane(self, scanInPlaneEndIsPlaneString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the plane stop criterion is matched
@@ -807,9 +932,9 @@ class Client:
       n          Number of through the plane
       Ei, Ej, Ek defines the surface direction at the end point. It defines the direction for retracting
     '''
-    return await self.sendCommand("ScanInPlaneEndIsPlane(%s)" % (scanInPlaneEndIsPlaneString), callbacks=callbacks)
+    return self.sendCommand("ScanInPlaneEndIsPlane(%s)" % (scanInPlaneEndIsPlaneString))
 
-  async def ScanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString, callbacks=None):
+  def ScanInPlaneEndIsCyl(self, scanInPlaneEndIsCylString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the cylinder stop criterion is matched
@@ -824,9 +949,9 @@ class Client:
       n          Number of through the cylinder
       Ei, Ej, Ek defines the surface vector at the end point. It defines the direction for retracting
     '''
-    return await self.sendCommand("ScanInPlaneEndIsCyl(%s)" % (scanInPlaneEndIsCylString), callbacks=callbacks)
+    return self.sendCommand("ScanInPlaneEndIsCyl(%s)" % (scanInPlaneEndIsCylString))
 
-  async def ScanInCylEndIsSphere(self, scanInCylEndIsSphereString, callbacks=None):
+  def ScanInCylEndIsSphere(self, scanInCylEndIsSphereString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -841,9 +966,9 @@ class Client:
       n            Number of reaching the stop sphere
       Ei, Ej, Ek   defines the surface at the end point. It defines the direction for retracting
     '''
-    return await self.sendCommand("ScanInCylEndIsSphere(%s)" % (scanInCylEndIsSphereString), callbacks=callbacks)
+    return self.sendCommand("ScanInCylEndIsSphere(%s)" % (scanInCylEndIsSphereString))
 
-  async def ScanInCylEndIsPlane(self, scanInCylEndIsPlaneString, callbacks=None):
+  def ScanInCylEndIsPlane(self, scanInCylEndIsPlaneString):
     '''
     Perform a scanning measurement along an unknown contour
     The scan stops if the sphere stop criterion is matched
@@ -859,5 +984,5 @@ class Client:
       n           number of through stop plane
       Ei, Ej, Ek  defines the surface direction at the end point. It defines the direction for retracting
     '''
-    return await self.sendCommand("ScanInCylEndIsPlane(%s)" % (scanInCylEndIsPlaneString), callbacks=callbacks)
+    return self.sendCommand("ScanInCylEndIsPlane(%s)" % (scanInCylEndIsPlaneString))
 

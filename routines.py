@@ -23,30 +23,47 @@ Ensure that the CMM is homed
   Wait until confirmation CMM is homed, or quit upon error
 '''
 async def ensureHomed(client):
+  isHomedTransaction = client.IsHomed()
+  await isHomedTransaction.complete()
+  isHomedData = isHomedTransaction.data_list
+  print(isHomedTransaction.data_list)
+  isCmmHomed = isHomedData[0][-4] == "1"
+  print("isHomed %s" % isCmmHomed)
+  
+  if not isCmmHomed:
+    home = client.Home()
+    await home.complete()
 
-  homedEvent = asyncio.Event()
-  waitForHomedTask = asyncio.create_task(waitForEvent(homedEvent))
 
-  async def homeCompleteCallback():
-    homedEvent.set()
+  '''
+    homedEvent = asyncio.Event()
+    waitForHomedTask = asyncio.create_task(waitForEvent(homedEvent))
 
-  async def isHomedDataCallback(msg):
-    isCmmHomed = msg[-4] == "1"
-    if not isCmmHomed:
-      homeCallbacks = ipp.TransactionCallbacks(complete=homeCompleteCallback)
-      await client.Home(callbacks=homeCallbacks)
-    else:
+    async def homeCompleteCallback():
       homedEvent.set()
 
-  async def isHomedErrorCallback(msg):
-    print("Got error from isHomed")
-  
-  isHomedCallbacks = ipp.TransactionCallbacks(data=isHomedDataCallback)
-  isHomedTag = await client.IsHomed(isHomedCallbacks)
+    async def isHomedDataCallback(msg):
+      isCmmHomed = msg[-4] == "1"
+      if not isCmmHomed:
+        homeCallbacks = ipp.TransactionCallbacks(complete=homeCompleteCallback)
+        await client.Home(callbacks=homeCallbacks)
+      else:
+        homedEvent.set()
 
-  print('waiting')
-  await waitForHomedTask
-  print('finished')
+    async def isHomedErrorCallback(msg):
+      print("Got error from isHomed")
+    
+    isHomedCallbacks = ipp.TransactionCallbacks(data=isHomedDataCallback)
+    isHomedTag = await client.IsHomed(isHomedCallbacks)
+
+    print('waiting')
+    await waitForHomedTask
+    print('finished')
+  '''
+
+async def ensureToolLoaded():
+  await futuresWaitForCommandComplete(client.GetProp, "Tool.Name()")
+
 
 async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints, surfaceWidth, dir, probeAngle):
   toolLength = 117.8
@@ -78,10 +95,9 @@ async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints,
     print("ContactPos %s" % contactPos)
     probeTravelVec = contactPos - centerRot 
     approachPos = midPos + (0.5*probeTravelVec)
-    await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,probeTravelVec.z), otherCallbacks={'data': ptMeasData})
+    await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,probeTravelVec.z),  otherCallbacks={'data': ptMeasData})
     # input()
 
-    
 
 
 '''
