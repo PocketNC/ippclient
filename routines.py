@@ -61,9 +61,13 @@ async def ensureHomed(client):
     print('finished')
   '''
 
-async def ensureToolLoaded():
-  await futuresWaitForCommandComplete(client.GetProp, "Tool.Name()")
-
+async def ensureToolLoaded(client,toolName):
+  getCurrTool = await client.GetProp(["Tool.Name()"]).complete()
+  print(getCurrTool.data_list)
+  if toolName not in getCurrTool.data_list[0]:
+    await client.ChangeTool(toolName).complete()
+    # await futuresWaitForCommandComplete(client.GetProp, "Tool.Name()")
+  
 
 async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints, surfaceWidth, dir, probeAngle):
   toolLength = 117.8
@@ -82,12 +86,12 @@ async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints,
   midPos = startPos + (0.5 * length) * lineVec
   perpVec = float3(lineVec.y, lineVec.x, lineVec.z).normalize()
   midPosApproach = midPos + perpVec * clearance
-  await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s),Tool.A(15),Tool.B(-90)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z))
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(15),Tool.B(0)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z)).complete()
   centerRot = midPosApproach - float3(toolLength * math.sin(15*math.pi/180),0,0)
   print(midPosApproach)
   print(centerRot)
   input()
-  await waitForCommandComplete(client.SetProp, "Tool.PtMeasPar.HeadTouch(1)")
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").complete()
   input()
   for step in range(numPoints):
     fracLen = step / numPoints * length
@@ -95,7 +99,7 @@ async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints,
     print("ContactPos %s" % contactPos)
     probeTravelVec = contactPos - centerRot 
     approachPos = midPos + (0.5*probeTravelVec)
-    await waitForCommandComplete(client.PtMeas, "X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,probeTravelVec.z),  otherCallbacks={'data': ptMeasData})
+    await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,0)).complete()
     # input()
 
 

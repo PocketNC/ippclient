@@ -99,7 +99,7 @@ class float3:
       raise ValueError('The dot product requires another vector')
     return sum(a * b for a, b in zip(self, vector))
 
-async def readPointData(data):
+def readPointData(data):
   logger.debug("read point data %s" % data)
   x = float(data[data.find("X(") + 2 : data.find("), Y")])
   y = float(data[data.find("Y(") + 2 : data.find("), Z")])
@@ -551,10 +551,6 @@ class Client:
     '''
     Move to a target position, including tool rotation
     '''
-    # loop = asyncio.get_running_loop()
-    # fut = loop.create_future()
-    # fut.add_done_callback(functools.partial(print, "Future:"))
-    logger.debug("GoTo cb %s" % callbacks.error)
     return self.sendCommand("GoTo(%s)" % positionString)
 
 
