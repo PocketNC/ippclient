@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import math
 import functools
 import traceback
+import numpy as np
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -31,8 +32,11 @@ class float3:
   def __init__(self, *args):
     if len(args)==0: 
       self.values = (0,0,0)
-    if len(args)==1 and isinstance(args[0], float3):
-      self.values = args[0].values
+    elif len(args)==1:
+      if isinstance(args[0], float3):
+        self.values = args[0].values
+      elif isinstance(args[0], list):
+        self.values = args[0]
     elif len(args) == 3:
       self.values = args
     else: 
@@ -40,13 +44,20 @@ class float3:
     self.x = self.values[0]
     self.y = self.values[1]
     self.z = self.values[2]
+
+
+  def __array__(self, dtype=None):
+      if dtype:
+          return np.array([self.x, self.y, self.z], dtype=dtype)
+      else:
+          return np.array([self.x, self.y, self.z])
   
   def __sub__(self, other):
     """ Returns the vector difference of self and other """
     if isinstance(other, float3):
       subbed = float3(self.x-other.x,self.y-other.y,self.z-other.z)
     elif isinstance(other, (int, float)):
-      subbed = float3( a - other for a in self )
+      subbed = float3( list(a - other for a in self) )
     else:
         raise ValueError("Subtraction with type {} not supported".format(type(other)))
     return self.__class__(*subbed)
@@ -58,7 +69,7 @@ class float3:
     if isinstance(other, float3):
       added = float3(other.x+self.x,other.y+self.y,other.z+self.z)
     elif isinstance(other, (int, float)):
-      added = float3( a + other for a in self )
+      added = float3( list(a + other for a in self) )
     else:
       raise ValueError("Addition with type {} not supported".format(type(other)))
     return added
@@ -66,7 +77,6 @@ class float3:
     return self.__add__(other)
 
   def __mul__(self,other):
-    print(other)
     if isinstance(other, float3):
       product = float3(other.x * self.x,other.y * self.y,other.z * self.z)
       return product
@@ -98,6 +108,17 @@ class float3:
     if not isinstance(vector, float3):
       raise ValueError('The dot product requires another vector')
     return sum(a * b for a, b in zip(self, vector))
+  
+  def ToXYZString(self):
+    return "X(%s),Y(%s),Z(%s)" % (self.x, self.y, self.z)
+  
+  @classmethod
+  def FromXYZString(cls, xyzString):
+    x = float(xyzString[xyzString.find("X(") + 2 : xyzString.find("), Y")])
+    y = float(xyzString[xyzString.find("Y(") + 2 : xyzString.find("), Z")])
+    z = float(xyzString[xyzString.find("Z(") + 2 : xyzString.find(")\r\n")])
+    return cls(x,y,z)
+
 
 def readPointData(data):
   logger.debug("read point data %s" % data)
@@ -106,6 +127,7 @@ def readPointData(data):
   z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
   pt = float3(x,y,z)
   return pt
+
 
 async def noop(args=None):
   pass
@@ -239,20 +261,26 @@ class Transaction:
   def _std_event_callback(self, key):
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
-    def callback(transaction):
-      fut.set_result(transaction)
+    def callback(transaction, isError=False):
+      logger.debug("calling back, error %s" % isError)
+      if isError:
+        logger.debug("ERROR!")
+        fut.set_exception(CmmException())
+      else:
+        fut.set_result(transaction)
     self.register_callback(key, callback, True)
     return fut
 
-  def _process_event_callbacks(self, event):
-    logger.debug('processing callbacks for %s', event )
+  def _process_event_callbacks(self, event, isError=False):
+    logger.debug('processing callbacks for %s, isError %s' % (event, isError) )
     eventCallbacks = getattr(self.callbacks, event)
     logger.debug(eventCallbacks)
     repeatCallbacks = []
     for cb in eventCallbacks:
       logger.debug(cb)
       func = cb['callback']
-      func(self)
+      logger.debug("about to callback, iserror %s" % isError)
+      func(self, isError)
       if not cb['once']:
         repeatCallbacks.append(cb)
     setattr(self.callbacks, event, repeatCallbacks)
@@ -287,7 +315,8 @@ class Transaction:
   def handle_error(self, err_msg):
     self.status = TransactionStatus.ERROR
     self.error_list.append(err_msg)
-    self._process_event_callbacks('error')
+    self._process_event_callbacks('error', True)
+    self._process_event_callbacks('complete', True)
 
   def handle_complete(self):
     self.status = TransactionStatus.COMPLETE
@@ -592,7 +621,7 @@ class Client:
     '''
     Perform a tool change
     '''
-    return self.sendCommand("ChangeTool(%s)" % toolName)
+    return self.sendCommand('ChangeTool("%s")' % toolName)
 
   def SetTool(self, toolName):
     '''

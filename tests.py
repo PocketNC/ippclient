@@ -90,29 +90,24 @@ async def pt():
 
 
 async def exc():
-  client = Client(HOST, PORT)
   try:
+    client = Client(HOST, PORT)
+    
     await client.connect()
 
-    print('waiting')
-    try:
-      # await client.GoTo("Z(0)")
-      r = await client.futureSendCommand(client.GoTo,"Z(0)")
-      r = await client.futureSendCommand(client.GoTo,"X(0)")
-      print("result %s" % r)
-    except CmmException as e:
-      print("Inner CmmExc %s" % e)
-    except Exception as e:
-      print("Inner Exc %s" % e)
+    # await client.StartSession().complete()
+    await client.ClearAllErrors().complete()
+
+    await client.GoTo("X(0)").complete()
+
+    await client.EndSession().complete()
 
     await asyncio.sleep(1)
     await client.disconnect()
   except CmmException as e:
-    print("Outer CmmExc %s" % e)
+    print("Inner CmmExc %s" % e)
   except Exception as e:
-    print("Outer Exc %s" % e)
-    print(e)
-
+    print("Inner Exc %s" % e)
 
 
 async def exc2():
