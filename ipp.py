@@ -262,13 +262,11 @@ class Transaction:
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     def callback(transaction, isError=False):
-      logger.debug("calling back, error %s" % isError)
-      if isError:
-        logger.debug("ERROR!")
-        fut.set_exception(CmmException())
-      else:
-        fut.set_result(transaction)
+      fut.set_result(transaction)
+    def error_callback(transaction, isError=False):
+      fut.set_exception(CmmException())
     self.register_callback(key, callback, True)
+    self.register_callback('error', callback, True)
     return fut
 
   def _process_event_callbacks(self, event, isError=False):

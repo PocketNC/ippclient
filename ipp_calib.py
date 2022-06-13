@@ -3,12 +3,12 @@ Prototype of V2 calibration routine
 '''
 import sys
 from ipp import Client, TransactionCallbacks, float3, CmmException, readPointData
-import routines
+import ipp_routines as routines
 import asyncio
 from tornado.ioloop import IOLoop
 from dataclasses import dataclass
-sys.path.append("/Users/jakedanczyk/source/nfs/pocketnc/Settings")
-import metrology
+# sys.path.append("/Users/jakedanczyk/source/nfs/pocketnc/Settings")
+# import metrology
 
 HOST = "10.0.0.1"
 PORT = 1294

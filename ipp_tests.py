@@ -3,13 +3,24 @@ A set of test methods that perform a variety of measurements
 '''
 import sys
 from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, futureWaitForCommandComplete, float3, CmmException
-import routines
+import ipp_routines as routines
 import asyncio
 from tornado.ioloop import IOLoop
 from dataclasses import dataclass
 
 HOST = "10.0.0.1"
 PORT = 1294
+
+X_ORIGIN = 528
+Y_ORIGIN = 238
+Z_ORIGIN = 400
+ORIGIN = float3(X_ORIGIN,Y_ORIGIN,Z_ORIGIN)
+
+waypoints = {
+  'origin': ORIGIN,
+  'top_l_bracket_front_right': float3(367.5, 422.0, 126.33),
+  'probe_fixture_tip': float3(326.0, 290.0, 50.0),
+}
 
 
 async def version():
@@ -26,6 +37,7 @@ async def version():
 
     await client.EndSession().complete()
     await client.disconnect()
+    return getVersion.data_list[0]
   except Exception as e:
     print("Test 'version' failed, exception")
     print(e)
@@ -50,7 +62,7 @@ async def homing():
   await client.ClearAllErrors().complete()
   await routines.ensureHomed(client)
 
-  await asyncio.sleep(3)
+  await asyncio.sleep(1)
   await client.EndSession().complete()
   await client.disconnect()
 
@@ -62,31 +74,26 @@ async def pt():
   if not await client.connect():
     print("Failed to connect to server.")
 
-  start = client.StartSession()
-  await start.send()
-  clearErrors = client.ClearAllErrors()
-  clearErrors.registerCallback("complete", )
-  task = clearErrors.complete()
+  await client.StartSession().complete()
+  await client.ClearAllErrors().complete()
+  await routines.ensureHomed(client)
 
-  setTool = client.SetTool("Component_3.1.50.4.A0.0-B0.0")
-  await setTool.complete()
+  await routines.ensureToolLoaded(client, "Component_3.1.50.4.A0.0-B0.0")
 
-  getPos = client.Get("X(),Y(),Z()")
-  await getPos.complete()
-  data = getPos.data_list[0]
-  x = float(data[data.find("X(") + 2 : data.find("), Y")])
-  y = float(data[data.find("Y(") + 2 : data.find("), Z")])
-  z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
-  startPos = float3(x,y,z)
+  approachPos = waypoints['top_l_bracket_front_right'] + float3(0,0,100)
+  await client.GoTo(approachPos.ToXYZString()).complete()
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(0)").complete()
+  await client.GoTo("Tool.A(0),Tool.B(0)").complete()
 
-  ptmeas = client.PtMeas("X(%s),Y(%s),Z(%s),IJK(0,0,1)" % (startPos.x,startPos.y,startPos.z))
-  await ptmeas.complete()
-  print(ptmeas.data_list)
+  ptMeas = await client.PtMeas("%s,IJK(0,0,1)" % (waypoints['top_l_bracket_front_right'].ToXYZString())).complete()
+  pt = float3.FromXYZString(ptMeas.data_list[0])
+  print(pt)
 
-  
-  end = client.EndSession()
-  await end.complete()
+  await asyncio.sleep(1)
+  await client.EndSession().complete()
   await client.disconnect()
+  return pt
+
 
 
 async def exc():
@@ -494,5 +501,5 @@ async def main():
   else:
     await globals()[sys.argv[1]]()
 
-if __name__ == "__main__":
-  asyncio.run(main())
+# if __name__ == "__main__":
+#   asyncio.run(main())
