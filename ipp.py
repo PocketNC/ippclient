@@ -37,6 +37,8 @@ class float3:
         self.values = args[0].values
       elif isinstance(args[0], list):
         self.values = args[0]
+      elif isinstance(args[0], np.ndarray):
+        self.values = args[0].tolist()
     elif len(args) == 3:
       self.values = args
     else: 
@@ -264,20 +266,17 @@ class Transaction:
     def callback(transaction, isError=False):
       fut.set_result(transaction)
     def error_callback(transaction, isError=False):
+      print("ERROR CALLBACK")
       fut.set_exception(CmmException())
     self.register_callback(key, callback, True)
-    self.register_callback('error', callback, True)
+    self.register_callback('error', error_callback, True)
     return fut
 
   def _process_event_callbacks(self, event, isError=False):
-    logger.debug('processing callbacks for %s, isError %s' % (event, isError) )
     eventCallbacks = getattr(self.callbacks, event)
-    logger.debug(eventCallbacks)
     repeatCallbacks = []
     for cb in eventCallbacks:
-      logger.debug(cb)
       func = cb['callback']
-      logger.debug("about to callback, iserror %s" % isError)
       func(self, isError)
       if not cb['once']:
         repeatCallbacks.append(cb)
@@ -404,19 +403,14 @@ class Client:
         msgTag = msg[0:5]
         responseKey = msg[6]
         if msgTag in self.transactions:
-          logger.debug("%s is in transactions dict" % msgTag)
           transaction = self.transactions[msgTag]
           if responseKey == IPP_ACK_CHAR:
-            logger.debug('handle ack')
             transaction.handle_ack()
           elif responseKey == IPP_COMPLETE_CHAR:
-            logger.debug('handle complete')
             transaction.handle_complete()
           elif responseKey == IPP_DATA_CHAR:
-            logger.debug('handle data')
             transaction.handle_data(msg)
           elif responseKey == IPP_ERROR_CHAR:
-            logger.debug("calling error")
             transaction.handle_error(msg)
         else:
           logger.debug("%s NOT in transactions dict" % msgTag)
