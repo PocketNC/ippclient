@@ -60,7 +60,7 @@ async def homing():
   
   await client.StartSession().complete()
   await client.ClearAllErrors().complete()
-  await routines.ensureHomed(client)
+  await routines.ensure_homed(client)
 
   await asyncio.sleep(1)
   await client.EndSession().complete()
@@ -76,9 +76,9 @@ async def pt():
 
   await client.StartSession().complete()
   await client.ClearAllErrors().complete()
-  await routines.ensureHomed(client)
+  await routines.ensure_homed(client)
 
-  await routines.ensureToolLoaded(client, "Component_3.1.50.4.A0.0-B0.0")
+  await routines.ensure_tool_loaded(client, "Component_3.1.50.4.A0.0-B0.0")
 
   approachPos = waypoints['top_l_bracket_front_right'] + float3(0,0,100)
   await client.GoTo(approachPos.ToXYZString()).complete()
@@ -384,6 +384,25 @@ async def linePlusYHeadTouchMinusX():
   # print(points)
 
 
+async def line():
+  client = Client(HOST, PORT)
+  await client.connect()
+
+  await client.ClearAllErrors().complete()
+  getPos = client.Get("X(),Y(),Z()")
+  await getPos.complete()
+  pos = float3.FromXYZString(getPos.data_list[0])
+
+  print(pos)
+  input()
+  await client.GoTo(pos.ToXYZString()).complete()
+  input()
+  await routines.probe_line(client, pos, float3(1,1,0), float3(1, -1, -1), 50, 10, 3)
+
+  
+  await client.EndSession().complete()
+  await client.disconnect()
+
 
 async def test1():
   client = Client(HOST, PORT)
@@ -393,7 +412,7 @@ async def test1():
   await waitForCommandComplete(client.StartSession)
   # await waitForCommandComplete(client.SetTool, "Component_3.1.50.4.A0.0-B0.0")
   await waitForCommandComplete(client.ClearAllErrors)
-  await routines.ensureHomed(client)
+  await routines.ensure_homed(client)
   input()
 
   # global startPos
@@ -423,7 +442,7 @@ async def test1():
   startPos = float3(252.57, 250.16, -56.60)
 
   # await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s)" % (startPos.x,startPos.y,startPos.z))
-  await routines.headProbeLine(client,startPos,float3(0,1,0),50,10,5,10,1,15)
+  await routines.headprobe_line(client,startPos,float3(0,1,0),50,10,5,10,1,15)
   # await routines.headOnlyLineOnVerticalFace(client,startPos,float3(0,1,0),50,3,10,1,15)
 
   await waitForCommandComplete(client.SetProp, "Tool.PtMeasPar.HeadTouch(0)")
@@ -438,51 +457,114 @@ async def test1():
 async def test45():
   client = Client(HOST, PORT)
   await client.connect()
-  messageHandler = asyncio.create_task(client.handleMessages())
+  await client.ClearAllErrors().complete()
 
-  await waitForCommandComplete(client.StartSession)
-  # await waitForCommandComplete(client.SetTool, "Component_3.1.50.4.A0.0-B0.0")
-  await waitForCommandComplete(client.ClearAllErrors)
-  await routines.ensureHomed(client)
-  input()
-
-  # global startPos
-  # startPos = float3()
-
-  # async def getData(data):
-  #   global startPos
-  #   x = float(data[data.find("X(") + 2 : data.find("), Y")])
-  #   y = float(data[data.find("Y(") + 2 : data.find("), Z")])
-  #   z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
-  #   startPos = float3(x,y,z)
-
-  # getPosDataCallback = getData
-
-  # global points
-  # points = []
-
-  # async def ptMeasData(data):
-  #   global points
-  #   print("ptmeas: %s" % data)
-  #   x = float(data[data.find("X(") + 2 : data.find("), Y")])
-  #   y = float(data[data.find("Y(") + 2 : data.find("), Z")])
-  #   z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
-  #   pt = float3(x,y,z)
-  #   points.append(pt)
-
-  startPos = float3(243.52, 683.88, 119.92)
+  startPos = float3(203.72, 138.57, 276.75)
 
   # await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s)" % (startPos.x,startPos.y,startPos.z))
-  await routines.headProbeLine(client,startPos,float3(1,-1,0),75,10,5,10,1,15)
+  points = await routines.headprobe_line(client,startPos,float3(-1,-1,0),30,10,3,10,-1,15)
   # await routines.headOnlyLineOnVerticalFace(client,startPos,float3(0,1,0),50,3,10,1,15)
 
-  await waitForCommandComplete(client.SetProp, "Tool.PtMeasPar.HeadTouch(0)")
 
-  await client.EndSession()
-  await asyncio.sleep(1)
+  await client.EndSession().complete()
   await client.disconnect()
 
-  # print(points)
+  print(points)
+
+
+
+async def headProbeXZ_vertical():
+  client = Client(HOST, PORT)
+  try:
+    await client.connect()
+  except CmmException:
+    pass
+  await client.ClearAllErrors().complete()
+  await routines.ensure_homed(client)
+  await routines.ensure_tool_loaded(client, "Component_3.1.50.4.A0.0-B0.0")
+  input()
+
+  getPos = client.Get("X(),Y(),Z()")
+  await getPos.complete()
+  # startPos = float3.FromXYZString(getPos.data_list[0])
+  startPos = float3(345.2, 643.1, 407.3)
+
+
+  # await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s)" % (startPos.x,startPos.y,startPos.z))
+  points = await routines.headprobe_line_xz(client,startPos,float3(0,0,-1),30,float3(1,0,0),5,1)
+  # await routines.headOnlyLineOnVerticalFace(client,startPos,float3(0,1,0),50,3,10,1,15)
+
+
+  await client.EndSession().complete()
+  await client.disconnect()
+
+  print(points)
+
+
+
+async def headProbeXZ_45():
+  client = Client(HOST, PORT)
+  try:
+    await client.connect()
+  except CmmException:
+    pass
+  await client.ClearAllErrors().complete()
+  await routines.ensure_homed(client)
+  await routines.ensure_tool_loaded(client, "Component_3.1.50.4.A0.0-B0.0")
+  input()
+
+  getPos = client.Get("X(),Y(),Z()")
+  await getPos.complete()
+  startPos = float3.FromXYZString(getPos.data_list[0])
+  # startPos = float3(345.2, 643.1, 407.3)
+
+
+  # await waitForCommandComplete(client.GoTo, "X(%s),Y(%s),Z(%s)" % (startPos.x,startPos.y,startPos.z))
+  points = await routines.headprobe_line_xz(client,startPos,float3(-1,0,-1),30,float3(1,0,0),5,1)
+  # await routines.headOnlyLineOnVerticalFace(client,startPos,float3(0,1,0),50,3,10,1,15)
+
+
+  await client.EndSession().complete()
+  await client.disconnect()
+
+  print(points)
+
+
+
+
+
+async def backface():
+  try:
+    client = Client(HOST, PORT)
+    
+    await client.connect()
+    await client.ClearAllErrors().complete()
+    await routines.ensure_homed(client)
+    await routines.ensure_tool_loaded(client, "Component_3.1.50.4.A0.0-B0.0")
+  
+    top_l_bracket_back_right = float3(371.9, 466.8, 126.33)
+    approachPos = top_l_bracket_back_right + float3(-10,10,10)
+    await client.GoTo(approachPos.ToXYZString()).complete()
+    await client.GoTo("Tool.A(0),Tool.B(0)").complete()
+    input()
+    approachPos = top_l_bracket_back_right + float3(-10,10,-20)
+    await client.GoTo(approachPos.ToXYZString()).complete()
+    input()
+    
+    await client.SetProp("Tool.PtMeasPar.HeadTouch(0)").complete()
+    await client.SetProp("Tool.PtMeasPar.Search(25)").complete()
+    ptMeas = await client.PtMeas("%s,IJK(0,1,0)" % (approachPos.ToXYZString())).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    input()
+    startPos = pt
+    await routines.headprobe_line(client,startPos,float3(-1,0,0),75,10,5,10,-1,15)
+
+    await client.EndSession().complete()
+    await client.disconnect()
+  except Exception as e:
+    print("Test 'version' failed, exception")
+    print(e)
+    await client.disconnect()
 
 
 
@@ -501,5 +583,5 @@ async def main():
   else:
     await globals()[sys.argv[1]]()
 
-# if __name__ == "__main__":
-#   asyncio.run(main())
+if __name__ == "__main__":
+  asyncio.run(main())

@@ -3,10 +3,11 @@ A set of routines that perform common command sequeunces and can be used in cons
 '''
 import sys
 import ipp
-from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, float3
+from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, float3, CmmException
 import asyncio
 from tornado.ioloop import IOLoop
 import math
+import numpy as np
 
 HOST = "10.0.0.1"
 PORT = 1294
@@ -22,14 +23,14 @@ Ensure that the CMM is homed
   Send IsHomed command
   Wait until confirmation CMM is homed, or quit upon error
 '''
-async def ensureHomed(client):
+async def ensure_homed(client):
   isHomedTransaction = client.IsHomed()
   await isHomedTransaction.complete()
   isHomedData = isHomedTransaction.data_list
   print(isHomedTransaction.data_list)
   isCmmHomed = isHomedData[0][-4] == "1"
   print("isHomed %s" % isCmmHomed)
-  
+
   if not isCmmHomed:
     home = client.Home()
     await home.complete()
@@ -52,7 +53,7 @@ async def ensureHomed(client):
 
     async def isHomedErrorCallback(msg):
       print("Got error from isHomed")
-    
+
     isHomedCallbacks = ipp.TransactionCallbacks(data=isHomedDataCallback)
     isHomedTag = await client.IsHomed(isHomedCallbacks)
 
@@ -61,47 +62,200 @@ async def ensureHomed(client):
     print('finished')
   '''
 
-async def ensureToolLoaded(client,toolName):
+
+async def ensure_tool_loaded(client,toolName):
   getCurrTool = await client.GetProp(["Tool.Name()"]).complete()
   print(getCurrTool.data_list)
   if toolName not in getCurrTool.data_list[0]:
     await client.ChangeTool(toolName).complete()
     # await futuresWaitForCommandComplete(client.GetProp, "Tool.Name()")
-  
 
-async def headProbeLine(client, startPos, lineVec, length, clearance, numPoints, surfaceWidth, dir, probeAngle):
+
+# async def probeLineInParallelPlane(client, startPos, lineVec, length, clearance, direction, plane):
+
+
+async def probe_line(client, startPos, lineVec, faceNorm, length, clearance, numPoints, direction):
+  '''
+  uses CMM motion
+  '''
   toolLength = 117.8
   global points
   points = []
-  async def ptMeasData(data):
-    global points
-    print("ptmeas: %s" % data)
-    x = float(data[data.find("X(") + 2 : data.find("), Y")])
-    y = float(data[data.find("Y(") + 2 : data.find("), Z")])
-    z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
-    pt = float3(x,y,z)
-    points.append(pt)
 
-  angle = 2*180/math.pi*math.atan(0.5*length/clearance)
+  startApproachPos = startPos + faceNorm * clearance
+  probeAlignVec = float3(np.cross(lineVec,faceNorm))*direction
+
+  await client.GoTo("Tool.Alignment(%s, %s, %s, %s,%s,%s)" % ( -probeAlignVec.x, -probeAlignVec.y, -probeAlignVec.z, -faceNorm.x,-faceNorm.y,-faceNorm.z )).complete()
+  await client.GoTo("%s" % ( startApproachPos.ToXYZString() )).complete()
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(0)").complete()
+  for step in range(numPoints):
+    fracLen = step / numPoints * length
+    approachPos = startApproachPos + lineVec * (step / (numPoints-1) * length)
+    contactPos = startPos + lineVec * (step / (numPoints-1) * length)
+    print("ContactPos %s" % contactPos)
+    await client.GoTo("X(%s),Y(%s),Z(%s),Tool.Alignment(%s, %s, %s, %s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z, -probeAlignVec.x, -probeAlignVec.y, -probeAlignVec.z, -faceNorm.x,-faceNorm.y,-faceNorm.z)).complete()
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,faceNorm.x,faceNorm.y,faceNorm.z)).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    points.append(pt)
+  return points
+
+
+async def omni_headprobe_line(client, startPos, lineVec, faceNorm, length, contactAngle, numPoints, direction):
+  '''
+  find the center position along the lineVec
+  find in-plane travel angle using center and start positions
+  find probeNormal at startPos contact using in-plane travel angle and contactAngle
+  find center of rotation  (from startPos back along probe normal defined by contactAngle and in-plane travel angle)
+  ...(i'm not sure how to finish this)
+  '''
+  return False
+
+
+async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction):
+  '''
+  headProbeLine for faces (approximately) parallel to CMM Y-axis
+  line up A-90, B-0 (or B-180) with mid pos
+  find A and B travel angles
+  find the horizontal travel distance (along X) using length and slope
+
+  line up A-90 with top pos (either end or start pos depending on slope)
+  the B-component perp to lineVec at midPos (midPos = startPos + lineVec * length * 0.5)
+
+  find B travel angle from
+  line up b-perp-to-lineVec
+  '''
+  toolLength = 117.8
+  points = []
+
   midPos = startPos + (0.5 * length) * lineVec
-  perpVec = float3(lineVec.y, lineVec.x, lineVec.z).normalize()
-  midPosApproach = midPos + perpVec * clearance
-  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(15),Tool.B(0)" % (midPosApproach.x,midPosApproach.y,midPosApproach.z)).complete()
-  centerRot = midPosApproach - float3(toolLength * math.sin(15*math.pi/180),0,0)
-  print(midPosApproach)
-  print(centerRot)
-  input()
+
+
+  # highPos = None
+  # slope = None
+  # slopeAngle = math.atan2(lineVec.z, lineVec.x)
+  # if lineVec.x == 0:
+  #   if lineVec.z < 0:
+  #     highPos = startPos
+  #     slope = -float("inf")
+  #   elif lineVec.z > 0:
+  #     highPos = startPos + lineVec * length
+  #     slope = float("inf")
+  #   else:
+  #     raise ValueError
+  # else:
+  #   slope = lineVec.z / lineVec.x
+  #   if lineVec.z < 0:
+  #     highPos = startPos
+  #   elif lineVec.z > 0:
+  #     highPos = startPos + lineVec * length
+  #   else:
+  #     raise ValueError
+
+  perpVec = float3(-1 * direction * lineVec.z, lineVec.y, direction*lineVec.x).normalize()
+  midPosApproach = midPos + perpVec * 10
+  midPosContactAngle = math.atan2(direction*lineVec.y, direction*lineVec.x)*180/math.pi
+  midPosB = 0 if direction < 0 else 180
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 90, midPosB)).ack()
+  # xyToolLength = toolLength * math.sin(probeAngle*math.pi/180)
+  # centerRot = midPosApproach + float3(xyToolLength * math.sin(midPosAngle),xyToolLength * math.cos(midPosAngle),0)
+  # print(midPosApproach)
+  # print(centerRot)
+  # input()
   await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").complete()
-  input()
+  # input()
   for step in range(numPoints):
     fracLen = step / numPoints * length
     contactPos = startPos + lineVec * (step / (numPoints-1) * length)
     print("ContactPos %s" % contactPos)
-    probeTravelVec = contactPos - centerRot 
-    approachPos = midPos + (0.5*probeTravelVec)
-    await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (approachPos.x,approachPos.y,approachPos.z,probeTravelVec.x,-probeTravelVec.y,0)).complete()
+    # probeTravelVec = contactPos - centerRot
+    # approachPos = contactPos - (0.5*probeTravelVec)
+    # print("ApproachPos %s" % approachPos)
     # input()
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,0,perpVec.z)).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    points.append(pt)
+  return points
 
+
+async def headprobe_line_yz(client, startPos, lineVec, length, faceNorm, numPoints, direction):
+  '''
+  headProbeLine for faces (approximately) parallel to CMM X-axis
+  line up A-90, B-0 (or B-180) with mid pos
+  find A and B travel angles
+  find the horizontal travel distance (along X) using length and slope
+
+  line up A-90 with top pos (either end or start pos depending on slope)
+  the B-component perp to lineVec at midPos (midPos = startPos + lineVec * length * 0.5)
+
+  find B travel angle from
+  line up b-perp-to-lineVec
+  '''
+  toolLength = 117.8
+  points = []
+
+  midPos = startPos + (0.5 * length) * lineVec
+  perpVec = float3(-1 * direction * lineVec.z, lineVec.y, direction*lineVec.x).normalize()
+  midPosApproach = midPos + perpVec * 10
+  midPosB = -90 if direction < 0 else 90
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 90, midPosB)).ack()
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").complete()
+
+  for step in range(numPoints):
+    fracLen = step / numPoints * length
+    contactPos = startPos + lineVec * (step / (numPoints-1) * length)
+    print("ContactPos %s" % contactPos)
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,0,perpVec.z)).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    points.append(pt)
+  return points
+
+
+async def headprobe_line(client, startPos, lineVec, length, clearance, numPoints, surfaceWidth, direction, probeAngle):
+  '''
+  only works for horizontal (constant Z) lines
+  '''
+  toolLength = 117.8
+  global points
+  points = []
+
+
+  # angle = 2*180/math.pi*math.atan(0.5*length/clearance)
+  midPos = startPos + (0.5 * length) * lineVec
+  perpVec = float3(-1 * direction * lineVec.y, direction * lineVec.x, lineVec.z).normalize()
+  midPosApproach = midPos + perpVec * clearance
+  midPosAngle = math.atan2(-1*direction*lineVec.x, direction*lineVec.y)*180/math.pi
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 0, midPosAngle)).ack()
+  xyToolLength = toolLength * math.sin(probeAngle*math.pi/180)
+  centerRot = midPosApproach + float3(xyToolLength * math.sin(midPosAngle),xyToolLength * math.cos(midPosAngle),0)
+  print(midPosApproach)
+  print(centerRot)
+  # input()
+  # await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").ack()
+  # input()
+  for step in range(numPoints):
+    fracLen = step / (numPoints-1) * length
+    contactPos = startPos + lineVec * (step / (numPoints-1) * length)
+    print("ContactPos %s" % contactPos)
+    len_on_face_from_mid_pos = direction * (0.5 * length - fracLen)
+    b_angle = midPosAngle - math.atan2(len_on_face_from_mid_pos,clearance) * 180/math.pi
+    await client.GoTo("Tool.A(%s),Tool.B(%s)" % ( 2, b_angle)).complete()
+
+    # probeTravelVec = contactPos - centerRot
+    # # approachPos = contactPos - (0.5*probeTravelVec)
+    # approachPos = contactPos - (0.5*probeTravelVec)
+    # print("ApproachPos %s" % approachPos)
+    # # input()
+    # try:
+    #   await client.GoTo("Tool.A(%s)" % ( probeAngle -2 )).ack()
+    #   ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,perpVec.y,0)).complete()
+    # except CmmException as e:
+    #   print("CmmException in headProbeLine, raising")
+    #   raise e
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,perpVec.y,0)).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    points.append(pt)
+    await client.GoTo("Tool.A(0)").send()
+  return points
 
 
 '''
@@ -121,7 +275,7 @@ Foreach angular step
   Find the expected contact point: intersection of line from midpoint along angle with feature line
   Step back on this line a fraction to define the approach point
 '''
-async def headOnlyLineOnVerticalFace(client, startPos, lineVec, length, numPoints, surfaceWidth, dir, probeAngle):
+async def headOnlyLineOnVerticalFace(client, startPos, lineVec, length, numPoints, surfaceWidth, direction, probeAngle):
 
   global calcToolAlignmentData
 
@@ -140,8 +294,8 @@ async def headOnlyLineOnVerticalFace(client, startPos, lineVec, length, numPoint
   #perpendicular vector in XY plane
   print("startPos %s " % startPos)
   perpVec = float3(startPos.y, startPos.z, startPos.x).normalize()
-  print("perpVec %s " % perpVec) 
-  #find the midpoint 
+  print("perpVec %s " % perpVec)
+  #find the midpoint
   #we will position probe body so probe swing is perpendicular to face at midpoint
   midPos = startPos + (0.5 * length) * lineVec
   midPosApproach = midPos + perpVec * 10
@@ -188,10 +342,9 @@ async def headOnlyLineOnVerticalFace(client, startPos, lineVec, length, numPoint
 
 
 
-
 async def surface():
   client = ipp.Client(HOST, PORT)
-  
+
   if not await client.connect():
     print("Failed to connect to server.")
 
@@ -214,7 +367,6 @@ async def surface():
 
 
 
-
 '''
 Command a single linear move on CMM
 Attach callbacks for ACK, COMPLETE, and ERROR
@@ -226,7 +378,7 @@ async def move():
 
   async def wait(event):
     await event.wait()
-  
+
   waitForGoToEvent = asyncio.Event()
   waitForGoToTask = asyncio.create_task(wait(waitForGoToEvent))
 
@@ -245,7 +397,7 @@ async def move():
 
   # await client.GetXtdErrStatus()
   # await asyncio.sleep(2)
-  
+
   # await client.SetProp(["Tool.GoToPar.Speed(2)"])
   # await asyncio.sleep(3)
 
@@ -277,14 +429,6 @@ async def move():
 
 
 
-
-
-
-
-
-
-
-
 async def main():
   print(sys.argv)
   selectedTest = sys.argv[1]
@@ -293,7 +437,7 @@ async def main():
     sys.exit(0)
   else:
     print("Running test %s" % selectedTest)
-  
+
 
   await globals()[sys.argv[1]]()
 

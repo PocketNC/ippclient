@@ -4,6 +4,7 @@ from enum import Enum
 import time
 import asyncio
 import logging
+import tornado
 from tornado.ioloop import IOLoop
 from tornado.tcpclient import TCPClient
 from tornado.iostream import StreamClosedError
@@ -334,6 +335,7 @@ class Client:
     self.points = []
 
   async def connect(self):
+    print(tornado.version)
     try:
       logger.debug('connecting')
       self.stream = await asyncio.wait_for(self.tcpClient.connect(self.host, self.port), timeout=3.0)
