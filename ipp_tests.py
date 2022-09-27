@@ -2,7 +2,7 @@
 A set of test methods that perform a variety of measurements
 '''
 import sys
-from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, futureWaitForCommandComplete, float3, CmmException
+from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCommandComplete, futureWaitForCommandComplete, float3, CmmException, readPointData
 import ipp_routines as routines
 import asyncio
 from tornado.ioloop import IOLoop
@@ -163,6 +163,27 @@ async def align():
   await asyncio.sleep(1)
   await client.disconnect()
 
+
+
+'''
+Perform a PtMeas in empty space
+Deal with the exception and try again
+'''
+async def ex_recovery():
+  client = Client(HOST, PORT)
+  await client.connect()
+  getCurrPosCmd = await client.Get("X(),Y(),Z()").complete()
+  currPos = readPointData(getCurrPosCmd.data_list[0])
+  try:
+    cmd = client.PtMeas("%s,IJK(0,1,0)" % (currPos.ToXYZString()))
+    ptMeas = await cmd.error()
+    print('got the error')
+    print(ptMeas)
+    print(ptMeas.exception())
+    # ptMeas = await asyncio.wait([cmd.complete(), cmd.error()], return_when=asyncio.FIRST_COMPLETED)
+  except Exception as e:
+    print('yeah')
+    print(e)
 
 
 '''
