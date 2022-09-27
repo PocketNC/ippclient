@@ -1,23 +1,37 @@
 import ipp
+import asyncio
 
-def main():
-  host = "localhost"
-#  port = 1294
-  port = 50007
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+async def main():
+  # host = "localhost"
+  host = "10.0.0.1"
+  # port = 50007
+  port = 1294
   client = ipp.Client(host, port)
 
-  if not client.connect():
+  if not await client.connect():
     print("Failed to connect to server.")
 
-  client.GetDMEVersion()
+  async def sendAndWait(ippCommandMethod):
+    # print("Send and wait: %s" % ippCommandMethod)
+    tag = await ippCommandMethod()
+    # print("Command tag %s" % tag)
+    while True:
+      msg = await client.handleMessage()
+      # print("Got msg: %s" % msg)
+      if ("%05d %%" % (tag)) in msg:
+        # print("%05d transaction complete" % tag)
+        break
 
-  message = client.handleMessage()
+  await sendAndWait(client.startSession)
+  await sendAndWait(client.getDMEVersion)
+  await sendAndWait(client.endSession)
 
-  print(message)
   print(client.transactions)
 
 
-  
 if __name__ == "__main__":
-  main()
+  asyncio.run(main())
