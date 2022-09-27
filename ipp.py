@@ -113,13 +113,13 @@ class float3:
     return sum(a * b for a, b in zip(self, vector))
   
   def ToXYZString(self):
-    return "X(%s),Y(%s),Z(%s)" % (self.x, self.y, self.z)
+    return "X(%s), Y(%s), Z(%s)" % (self.x, self.y, self.z)
   
   @classmethod
   def FromXYZString(cls, xyzString):
     x = float(xyzString[xyzString.find("X(") + 2 : xyzString.find("), Y")])
     y = float(xyzString[xyzString.find("Y(") + 2 : xyzString.find("), Z")])
-    z = float(xyzString[xyzString.find("Z(") + 2 : xyzString.find(")\r\n")])
+    z = float(xyzString[xyzString.find("Z(") + 2 : xyzString.rfind(")")])
     return cls(x,y,z)
 
 
@@ -127,7 +127,7 @@ def readPointData(data):
   logger.debug("read point data %s" % data)
   x = float(data[data.find("X(") + 2 : data.find("), Y")])
   y = float(data[data.find("Y(") + 2 : data.find("), Z")])
-  z = float(data[data.find("Z(") + 2 : data.find(")\r\n")])
+  z = float(data[data.find("Z(") + 2 : data.rfind(")")])
   pt = float3(x,y,z)
   return pt
 
