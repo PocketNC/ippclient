@@ -267,8 +267,7 @@ class Transaction:
     def callback(transaction, isError=False):
       fut.set_result(transaction)
     def error_callback(transaction, isError=False):
-      print("ERROR CALLBACK")
-      fut.set_exception(CmmException())
+      fut.set_exception(CmmException("".join(transaction.error_list)))
     self.register_callback(key, callback, True)
     self.register_callback('error', error_callback, True)
     return fut
@@ -314,7 +313,6 @@ class Transaction:
     self.status = TransactionStatus.ERROR
     self.error_list.append(err_msg)
     self._process_event_callbacks('error', True)
-    self._process_event_callbacks('complete', True)
 
   def handle_complete(self):
     self.status = TransactionStatus.COMPLETE
@@ -406,14 +404,15 @@ class Client:
         responseKey = msg[6]
         if msgTag in self.transactions:
           transaction = self.transactions[msgTag]
-          if responseKey == IPP_ACK_CHAR:
-            transaction.handle_ack()
-          elif responseKey == IPP_COMPLETE_CHAR:
-            transaction.handle_complete()
-          elif responseKey == IPP_DATA_CHAR:
-            transaction.handle_data(msg)
-          elif responseKey == IPP_ERROR_CHAR:
-            transaction.handle_error(msg)
+          if transaction.status != TransactionStatus.ERROR:
+            if responseKey == IPP_ACK_CHAR:
+              transaction.handle_ack()
+            elif responseKey == IPP_COMPLETE_CHAR:
+              transaction.handle_complete()
+            elif responseKey == IPP_DATA_CHAR:
+              transaction.handle_data(msg)
+            elif responseKey == IPP_ERROR_CHAR:
+              transaction.handle_error(msg)
         else:
           logger.debug("%s NOT in transactions dict" % msgTag)
     except StreamClosedError:
@@ -635,7 +634,7 @@ class Client:
     '''
     return self.sendCommand("GoToPar()")
 
-  def PrMeasPar(self):
+  def PtMeasPar(self):
     '''
     This method acts as a pointer to the PtMeasParameter block of the DME
     '''
