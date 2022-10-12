@@ -270,7 +270,13 @@ class Transaction:
       fut.set_exception(CmmException("".join(transaction.error_list)))
     self.register_callback(key, callback, True)
     self.register_callback('error', error_callback, True)
-    return fut
+    if self.sendCoro:
+      coro = self.sendCoro
+      self.sendCoro = None
+      return asyncio.gather(coro, fut)
+    else:
+      return fut
+
 
   def _process_event_callbacks(self, event, isError=False):
     eventCallbacks = getattr(self.callbacks, event)
@@ -336,11 +342,10 @@ class Client:
     print(tornado.version)
     try:
       logger.debug('connecting')
-      self.stream = await asyncio.wait_for(self.tcpClient.connect(self.host, self.port), timeout=3.0)
-      logger.debug('connected')
+      self.stream = await self.tcpClient.connect(self.host, self.port, timeout=3.0)
+      logger.debug('connected %s' % (self.stream,))
       
       self.listenerTask = asyncio.create_task(self.handleMessages())
-      await self.StartSession().complete()
       return True
     except Exception as e:
       logger.error("connect error %s", traceback.format_exc())
@@ -369,7 +374,7 @@ class Client:
       transaction = Transaction(tag, command)
       self.transactions[tag] = transaction
       
-      transaction.sendTask = asyncio.create_task(self._coro_send_command(transaction))
+      transaction.sendCoro = self._coro_send_command(transaction)
       return transaction
     except Exception as e:
       logger.error(e)
@@ -378,7 +383,7 @@ class Client:
   async def _coro_send_command(self, transaction):
     message = "%s %s\r\n" % (transaction.tag, transaction.command)
     try:
-      await asyncio.wait_for(self.stream.write(message.encode('ascii')), timeout=3.0)
+      await asyncio.wait_for(self.stream.write(message.encode('ascii')), 3.0)
     except asyncio.TimeoutError as e:
       logger.debug("Timeout!")
       loop = asyncio.get_running_loop()
@@ -424,7 +429,6 @@ class Client:
   I++ Server Methods
   '''
   def StartSession(self):
-    self.sendCommand("EndSession()")
     return self.sendCommand("StartSession()")
 
   def EndSession(self):
