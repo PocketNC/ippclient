@@ -270,10 +270,15 @@ class Transaction:
       fut.set_exception(CmmException("".join(transaction.error_list)))
     self.register_callback(key, callback, True)
     self.register_callback('error', error_callback, True)
+
     if self.sendCoro:
-      coro = self.sendCoro
+      sendCoro = self.sendCoro
+      async def mycoro():
+        await sendCoro
+        return await fut
+
       self.sendCoro = None
-      return asyncio.gather(coro, fut)
+      return asyncio.create_task(mycoro())
     else:
       return fut
 
@@ -337,6 +342,9 @@ class Client:
     self.events = {}
     self.buffer = ""
     self.points = []
+
+  def is_connected(self):
+    return not self.stream.closed() if self.stream else False
 
   async def connect(self):
     print(tornado.version)
@@ -550,28 +558,6 @@ class Client:
       "X(), Y(), Z(), Tool.A(), Tool.B()"
     '''
     return self.sendCommand("Get(%s)" % queryString)
-
-  def GoToFuture(self, positionString):
-    '''
-    Move to a target position, including tool rotation
-    '''
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    fut.add_done_callback(functools .partial(print, "Future:"))
-    callbacks = TransactionCallbacks(complete=(lambda: setFutureResult(fut,"yay")), error=(lambda: setFutureException(fut,"boo")))
-    return fut
-
-  def GoToTask(self, positionString):
-    '''
-    Move to a target position, including tool rotation
-    '''
-    # loop = asyncio.get_running_loop()
-    # fut = loop.create_future()
-    # fut.add_done_callback(functools.partial(print, "Future:"))
-    # callbacks = TransactionCallbacks(complete=(lambda: setFutureResult(fut,"yay")), error=(lambda: setFutureException(fut,"boo")))
-    logger.debug("GoTo cb %s" % callbacks.error)
-    task = asyncio.create_task(self.sendCommand("GoTo(%s" % positionString))
-    return task
 
   def GoTo(self, positionString):
     '''
