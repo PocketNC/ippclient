@@ -227,15 +227,12 @@ async def headprobe_line(client, startPos, lineVec, length, clearance, numPoints
   await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 0, midPosAngle)).ack()
   xyToolLength = toolLength * math.sin(probeAngle*math.pi/180)
   centerRot = midPosApproach + float3(xyToolLength * math.sin(midPosAngle),xyToolLength * math.cos(midPosAngle),0)
-  print(midPosApproach)
-  print(centerRot)
   # input()
   # await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").ack()
   # input()
   for step in range(numPoints):
     fracLen = step / (numPoints-1) * length
     contactPos = startPos + lineVec * (step / (numPoints-1) * length)
-    print("ContactPos %s" % contactPos)
     len_on_face_from_mid_pos = direction * (0.5 * length - fracLen)
     b_angle = midPosAngle - math.atan2(len_on_face_from_mid_pos,clearance) * 180/math.pi
     await client.GoTo("Tool.A(%s),Tool.B(%s)" % ( 2, b_angle)).complete()
@@ -251,7 +248,7 @@ async def headprobe_line(client, startPos, lineVec, length, clearance, numPoints
     # except CmmException as e:
     #   print("CmmException in headProbeLine, raising")
     #   raise e
-    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,perpVec.y,0)).complete()
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,perpVec.y,0)).data()
     pt = float3.FromXYZString(ptMeas.data_list[0])
     points.append(pt)
     await client.GoTo("Tool.A(0)").send()
