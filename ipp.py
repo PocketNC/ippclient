@@ -368,7 +368,6 @@ class Client:
       raise e
 
   def sendCommand(self, command, isEvent=False):
-    logger.debug("sendCommand %s ", command)
     try:
       if isEvent:
         tagNum = self.nextEventTagNum
@@ -378,6 +377,8 @@ class Client:
         tagNum = self.nextTagNum
         tag = "%05d" % tagNum 
         self.nextTagNum = self.nextTagNum%99999+1 # Get the next tag between 1 - 99999
+
+      logger.debug("sendCommand %s, tag %s " % (command, tag))
         
       transaction = Transaction(tag, command)
       self.transactions[tag] = transaction
