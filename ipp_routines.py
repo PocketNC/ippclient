@@ -111,7 +111,7 @@ async def omni_headprobe_line(client, startPos, lineVec, faceNorm, length, conta
   return False
 
 
-async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction):
+async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction, headPos):
   '''
   headProbeLine for faces (approximately) parallel to CMM Y-axis
   line up A-90, B-0 (or B-180) with mid pos
@@ -128,34 +128,16 @@ async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoin
   points = []
 
   midPos = startPos + (0.5 * length) * lineVec
+  print('midPos %s' % (midPos,))
 
-
-  # highPos = None
-  # slope = None
-  # slopeAngle = math.atan2(lineVec.z, lineVec.x)
-  # if lineVec.x == 0:
-  #   if lineVec.z < 0:
-  #     highPos = startPos
-  #     slope = -float("inf")
-  #   elif lineVec.z > 0:
-  #     highPos = startPos + lineVec * length
-  #     slope = float("inf")
-  #   else:
-  #     raise ValueError
-  # else:
-  #   slope = lineVec.z / lineVec.x
-  #   if lineVec.z < 0:
-  #     highPos = startPos
-  #   elif lineVec.z > 0:
-  #     highPos = startPos + lineVec * length
-  #   else:
-  #     raise ValueError
-
-  perpVec = float3(-1 * direction * lineVec.z, lineVec.y, direction*lineVec.x).normalize()
+  perpVec = float3(lineVec.x, -1 * direction * lineVec.z, direction*lineVec.y).normalize()
+  print('perpVec %s' % (perpVec,))
   midPosApproach = midPos + perpVec * 10
-  midPosContactAngle = math.atan2(direction*lineVec.y, direction*lineVec.x)*180/math.pi
-  midPosB = 0 if direction < 0 else 180
-  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 90, midPosB)).ack()
+  print('midPosApproach %s' % (midPosApproach,))
+
+  midPosContactAngle = math.atan2(direction*lineVec.z, direction*lineVec.y)*180/math.pi
+  midPosB = 0 if headPos < 0 else 180
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 90, midPosB)).complete()
   # xyToolLength = toolLength * math.sin(probeAngle*math.pi/180)
   # centerRot = midPosApproach + float3(xyToolLength * math.sin(midPosAngle),xyToolLength * math.cos(midPosAngle),0)
   # print(midPosApproach)
@@ -194,6 +176,7 @@ async def headprobe_line_yz(client, startPos, lineVec, length, faceNorm, numPoin
   points = []
 
   midPos = startPos + (0.5 * length) * lineVec
+
   perpVec = float3(-1 * direction * lineVec.z, lineVec.y, direction*lineVec.x).normalize()
   midPosApproach = midPos + perpVec * 10
   midPosB = -90 if direction < 0 else 90
