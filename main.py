@@ -1,8 +1,6 @@
 import ipp
 import asyncio
 
-
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 async def main():

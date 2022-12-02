@@ -14,7 +14,6 @@ import functools
 import traceback
 import numpy as np
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 RECEIVE_SIZE = 1024
@@ -247,6 +246,7 @@ class Transaction:
     self.futures = {}
     self.sendTask = None
     self.command = cmd
+    self.fut = None
     self.callbacks = TransactionCallbacks()
 
   def register_callback(self, event, callback, once):
@@ -265,11 +265,15 @@ class Transaction:
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     def callback(transaction, isError=False):
+      self.fut = None
       fut.set_result(transaction)
     def error_callback(transaction, isError=False):
+      self.fut = None
       fut.set_exception(CmmException("".join(transaction.error_list)))
     self.register_callback(key, callback, True)
     self.register_callback('error', error_callback, True)
+
+    self.fut = fut
 
     if self.sendCoro:
       sendCoro = self.sendCoro
@@ -297,35 +301,44 @@ class Transaction:
     return self._std_event_callback("send")
 
   def ack(self):
+    logger.debug("creating ack future for message %s", self.tag)
     return self._std_event_callback("ack")
 
   def complete(self):
+    logger.debug("creating complete future for message %s", self.tag)
     return self._std_event_callback("complete")
 
   def data(self):
+    logger.debug("creating data future for message %s", self.tag)
     return self._std_event_callback("data")
 
   def error(self):
+    logger.debug("creating error future for message %s", self.tag)
     return self._std_event_callback("error")
 
   def handle_send(self):
+    logger.debug("handling send for message %s", self.tag)
     self.status = TransactionStatus.SENT
     self._process_event_callbacks('send')
 
   def handle_ack(self):
+    logger.debug("handling ack for message %s", self.tag)
     self.status = TransactionStatus.ACK
     self._process_event_callbacks('ack')
 
   def handle_data(self, data_msg):
+    logger.debug("handling data for message %s", self.tag)
     self.data_list.append(data_msg)
     self._process_event_callbacks('data')
 
   def handle_error(self, err_msg):
+    logger.debug("handling error for message %s", self.tag)
     self.status = TransactionStatus.ERROR
     self.error_list.append(err_msg)
     self._process_event_callbacks('error', True)
 
   def handle_complete(self):
+    logger.debug("handling complete for message %s", self.tag)
     self.status = TransactionStatus.COMPLETE
     self._process_event_callbacks('complete')
 
@@ -426,7 +439,9 @@ class Client:
             elif responseKey == IPP_DATA_CHAR:
               transaction.handle_data(msg)
             elif responseKey == IPP_ERROR_CHAR:
-              transaction.handle_error(msg)
+              for t in self.transactions.values():
+                if t.fut:
+                  t.handle_error(msg)
         else:
           logger.debug("%s NOT in transactions dict" % msgTag)
     except StreamClosedError:
