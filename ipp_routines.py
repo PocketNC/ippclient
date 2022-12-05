@@ -8,6 +8,9 @@ import asyncio
 from tornado.ioloop import IOLoop
 import math
 import numpy as np
+import logging
+logger = logging.getLogger(__name__)
+
 
 HOST = "10.0.0.1"
 PORT = 1294
@@ -124,6 +127,7 @@ async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoin
   find B travel angle from
   line up b-perp-to-lineVec
   '''
+  logger.debug('headprobe_line_xz 1')
   toolLength = 117.8
   points = []
 
@@ -153,7 +157,7 @@ async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoin
     # approachPos = contactPos - (0.5*probeTravelVec)
     # print("ApproachPos %s" % approachPos)
     # input()
-    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,0,perpVec.z)).complete()
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,perpVec.x,perpVec.y,perpVec.z)).complete()
     pt = float3.FromXYZString(ptMeas.data_list[0])
     points.append(pt)
   return points
