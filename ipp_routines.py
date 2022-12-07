@@ -114,7 +114,7 @@ async def omni_headprobe_line(client, startPos, lineVec, faceNorm, length, conta
   return False
 
 
-async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction, headPos):
+async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction, headPos, aAngle=90):
   '''
   headProbeLine for faces (approximately) parallel to CMM Y-axis
   line up A-90, B-0 (or B-180) with mid pos
@@ -141,7 +141,7 @@ async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoin
 
   midPosContactAngle = math.atan2(direction*lineVec.z, direction*lineVec.y)*180/math.pi
   midPosB = 0 if headPos < 0 else 180
-  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, 90, midPosB)).complete()
+  await client.GoTo("X(%s),Y(%s),Z(%s),Tool.A(%s),Tool.B(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z, aAngle, midPosB)).complete()
   # xyToolLength = toolLength * math.sin(probeAngle*math.pi/180)
   # centerRot = midPosApproach + float3(xyToolLength * math.sin(midPosAngle),xyToolLength * math.cos(midPosAngle),0)
   # print(midPosApproach)
