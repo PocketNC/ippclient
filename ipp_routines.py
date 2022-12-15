@@ -15,6 +15,43 @@ logger = logging.getLogger(__name__)
 HOST = "10.0.0.1"
 PORT = 1294
 
+async def probe_sphere_relative(client, radius):
+  pts = []
+
+  await client.SetCoordSystem("MachineCsy").complete()
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(0)").ack()
+  getCurrPosCmd = await client.Get("X(),Y(),Z()").data()
+  start_pos = readPointData(getCurrPosCmd.data_list[0])
+  pt_meas = await client.PtMeas("%s,IJK(0,0,1)" % ((start_pos + float3(0, 0, -10)).ToXYZString())).data()
+  top_pt = float3.FromXYZString(pt_meas.data_list[0])
+
+  pts.append(top_pt)
+
+  #from CNC +X (probe in -X)
+  await client.GoTo((top_pt + float3(radius + 5, 0, 5)).ToXYZString()).ack()
+  await client.GoTo((top_pt + float3(radius + 5, 0, -radius)).ToXYZString()).ack()
+  pt_meas = await self.client.PtMeas("%s,IJK(1,0,0)" % ((top_pt + float3(radius, 0, -radius)).ToXYZString())).data()
+  pt = float3.FromXYZString(pt_meas.data_list[0])
+  pts.append(pt)
+
+  #from CNC +Y (probe in -Y)
+  await client.GoTo((top_pt + float3(radius + 5, radius +5, -radius)).ToXYZString()).ack()
+  await client.GoTo((top_pt + float3(0, radius +5, -radius)).ToXYZString()).ack()
+  pt_meas = await client.PtMeas("%s,IJK(0,1,0)" % ((top_pt + float3(0, radius, -radius)).ToXYZString())).data()
+  pt = float3.FromXYZString(pt_meas.data_list[0])
+  pts.append(pt)
+
+  #from CNC -X (probe in +X)
+  await client.GoTo((top_pt + float3(-(radius + 5), radius +5, -radius)).ToXYZString()).ack()
+  await client.GoTo((top_pt + float3(-(radius + 5), 0, -radius)).ToXYZString()).ack()
+  pt_meas = await client.PtMeas("%s,IJK(-1,0,0)" % ((top_pt + float3(-radius, 0, -radius)).ToXYZString())).data()
+  pt = float3.FromXYZString(pt_meas.data_list[0])
+  pts.append(pt)
+
+  await client.GoTo(start_pos.ToXYZString()).complete()
+
+  return pts
+
 
 '''
 Ensure that the CMM is homed
@@ -410,6 +447,7 @@ async def move():
   await client.disconnect()
 
   # await client.GoTo("X(0)")
+
 
 
 
