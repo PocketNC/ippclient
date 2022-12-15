@@ -13,6 +13,7 @@ import math
 import functools
 import traceback
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,59 @@ class float3:
     z = float(xyzString[xyzString.find("Z(") + 2 : xyzString.rfind(")")])
     return cls(x,y,z)
 
+# I++ documentation mentions zxz rotation order in an example and 
+# experimentation has shown it work. 
+ORDER = 'zxz'
+class Csy:
+  def __init__(self, x,y,z,theta,psi,phi):
+    """
+    Parameters are in the same order as they are passed to I++'s SetCsyTransform.
+    Note that the order of the angles is different than the order they are passed 
+    in to perform euler angle calculations.
+    """
+    self.x = x
+    self.y = y
+    self.z = z
+    self.theta = theta
+    self.psi = psi
+    self.phi = phi
+
+  def toMatrix4(self):
+    r = Rotation.from_euler(ORDER, (self.phi, self.theta, self.psi), degrees=True)
+
+    # Convert rotation to 3x3 matrix
+    mat3 = r.as_matrix()
+
+    # Initialize empty 4x4 matrix
+    mat4 = np.empty((4,4))
+
+    # Copy 3x3 rotation matrix into top left of 4x4 matrix
+    mat4[:3,:3] = mat3
+
+    # Populate the translation portion of the 4x4 matrix with the origin
+    mat4[:3,3] = (self.x, self.y, self.z)
+
+    # Fill in the homogenous coordinates
+    mat4[3,:] = [0,0,0,1]
+
+    return mat4
+
+  def fromMatrix4(mat4):
+    # Extract the 3x3 rotation matrix from the 4x4 matrix
+    mat3 = mat4[0:3, 0:3]
+
+    # Create a rotation object with rotation matrix
+    r = Rotation.from_matrix(mat3)
+
+    # Convert rotation to euler angles
+    (phi, theta, psi) = r.as_euler(ORDER, degrees=True)
+
+    # Extract the origin from the translation components of 4x4 matrix
+    x = mat4[0][3]
+    y = mat4[1][3]
+    z = mat4[2][3]
+
+    return Csy(x,y,z,theta,psi,phi)
 
 def readPointData(data):
   logger.debug("read point data %s" % data)

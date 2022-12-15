@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 HOST = "10.0.0.1"
 PORT = 1294
 
+async def set_part_csy(client, csy):
+  await client.SetCsyTransformation("PartCsy, %s, %s, %s, %s, %s, %s" % (csy.x, csy.y, csy.z, csy.theta, csy.psi, csy.phi)).complete()
+  await cmm.SetCoordSystem("PartCsy").complete()
+
 async def probe_sphere_relative(client, radius):
   pts = []
 
