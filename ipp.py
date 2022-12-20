@@ -34,16 +34,16 @@ class float3:
     if len(args)==0: 
       self.values = (0,0,0)
     elif len(args)==1:
-      if isinstance(args[0], float3):
-        self.values = args[0].values
-      elif isinstance(args[0], list):
-        self.values = args[0]
-      elif isinstance(args[0], np.ndarray):
-        self.values = args[0].tolist()
+      if hasattr(args[0], '__iter__'):
+        self.values = tuple([ i for i in args[0] ])
+      else:
+        logger.debug("failed to create values")
+        raise ValueError("Invalid args {} for float3".format(args))
     elif len(args) == 3:
       self.values = args
     else: 
       raise ValueError("Invalid args {} for float3".format(args))
+
     self.x = self.values[0]
     self.y = self.values[1]
     self.z = self.values[2]
