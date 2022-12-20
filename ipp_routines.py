@@ -7,6 +7,7 @@ from ipp import Client, TransactionCallbacks, waitForEvent, setEvent, waitForCom
 import asyncio
 from tornado.ioloop import IOLoop
 import math
+from scipy.spatial.transform import Rotation as R
 import numpy as np
 import logging
 logger = logging.getLogger(__name__)
@@ -153,6 +154,41 @@ async def omni_headprobe_line(client, startPos, lineVec, faceNorm, length, conta
   ...(i'm not sure how to finish this)
   '''
   return False
+
+async def headline(client, startPos, lineVec, length, face_norm, numPoints, direction, clearance):
+  '''
+  headline
+  '''
+  logger.debug('headline')
+  toolLength = 117.8
+  points = []
+
+  lineVec = lineVec.normalize()
+
+  midPos = startPos + (0.5 * length) * lineVec
+  print('midPos %s' % (midPos,))
+
+  perpVec = float3(direction*np.cross(lineVec,face_norm)).normalize()
+  print('perpVec %s' % (perpVec,))
+
+  r = R.from_rotvec(np.pi/4*lineVec)
+
+  [rot_perp_vec] = r.apply([np.array(perpVec) ])
+    
+  midPosApproach = midPos + clearance*face_norm
+  print('midPosApproach %s' % (midPosApproach,))
+
+  await client.AlignTool("%s,%s,%s,0" %(rot_perp_vec[0],rot_perp_vec[1],rot_perp_vec[2])).complete()
+  await client.GoTo("X(%s),Y(%s),Z(%s)" % ( midPosApproach.x, midPosApproach.y, midPosApproach.z)).complete()
+  await client.SetProp("Tool.PtMeasPar.HeadTouch(1)").complete()
+  for step in range(numPoints):
+    fracLen = step / numPoints * length
+    contactPos = startPos + lineVec * (step / (numPoints-1) * length)
+    ptMeas = await client.PtMeas("X(%s),Y(%s),Z(%s),IJK(%s,%s,%s)" % (contactPos.x,contactPos.y,contactPos.z,face_norm.x,face_norm.y,face_norm.z)).complete()
+    pt = float3.FromXYZString(ptMeas.data_list[0])
+    points.append(pt)
+  return points
+
 
 
 async def headprobe_line_xz(client, startPos, lineVec, length, faceNorm, numPoints, direction, headPos, aAngle=90):
