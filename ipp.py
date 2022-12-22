@@ -1,3 +1,6 @@
+"""
+An I++ client implemented in python using asycio async/await syntax.
+"""
 import socket
 import sys
 from enum import Enum
