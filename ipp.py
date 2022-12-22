@@ -122,6 +122,9 @@ class float3:
     z = float(xyzString[xyzString.find("Z(") + 2 : xyzString.rfind(")")])
     return cls(x,y,z)
 
+  def ToIJKString(self):
+    return "IJK(%s,%s,%s)" % (self.x, self.y, self.z)
+
 # I++ documentation mentions zxz rotation order in an example and 
 # experimentation has shown it work. 
 ORDER = 'zxz'
