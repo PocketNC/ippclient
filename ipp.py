@@ -107,6 +107,8 @@ class float3:
       yield val
   def __repr__(self):
         return str(self.values)
+  def __getitem__(self, item):
+    return self.values[item]
 
   def inner(self, vector):
     """ Returns the dot product (inner product) of self and another vector
