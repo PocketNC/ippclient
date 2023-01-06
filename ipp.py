@@ -417,6 +417,8 @@ class Client:
     self.events = {}
     self.buffer = ""
     self.points = []
+    self.eventCallbacks = []
+    self.eventFutures = []
 
   def is_connected(self):
     return not self.stream.closed() if self.stream else False
@@ -480,6 +482,30 @@ class Client:
     msg = msg.decode("ascii")
     return msg
 
+  def addEventCallback(self, callback):
+    self.eventCallbacks.append(callback)
+
+  def removeEventCallback(self, callback):
+    self.eventCallbacks.remove(callback)
+
+  def manualProbe(self):
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    def callback(msg):
+      try:
+        self.eventFutures.remove(fut)
+        self.removeEventCallback(callback)
+        fut.set_result(msg)
+      except Exception as e:
+        fut.set_exception(e)
+
+    self.addEventCallback(callback)
+
+    self.eventFutures.append(fut)
+
+    return fut
+    
+
   async def handleMessages(self, stopTag=None, stopKey=None):
     '''
     Run this in a coroutine
@@ -491,6 +517,12 @@ class Client:
         logger.debug("handleMessage: %s" % msg)
         msgTag = msg[0:5]
         responseKey = msg[6]
+        if msgTag == "E0000":
+          logger.debug("Received E0000 event, calling all registered callbacks")
+          for callback in self.eventCallbacks:
+            logger.debug("Calling callback %s" % (callback,))
+            callback(msg[8:])
+
         if msgTag in self.transactions:
           transaction = self.transactions[msgTag]
           if transaction.status != TransactionStatus.ERROR:
@@ -504,6 +536,9 @@ class Client:
               for t in self.transactions.values():
                 if t.fut:
                   t.handle_error(msg)
+              for f in self.eventFutures:
+                f.set_exception(CmmException(msg))
+              self.eventFutures.clear()
         else:
           logger.debug("%s NOT in transactions dict" % msgTag)
     except StreamClosedError:
