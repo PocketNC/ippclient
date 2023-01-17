@@ -121,6 +121,12 @@ class float3:
     return "X(%s), Y(%s), Z(%s)" % (self.x, self.y, self.z)
   
   @classmethod
+  def FromPtMeasString(cls,ptMeasString):
+    xyzString = ptMeasString[ptMeasString.find("PtMeas(") + 7 : ptMeasString.rfind(")")]
+    return cls.FromXYZString(xyzString)
+    
+
+  @classmethod
   def FromXYZString(cls, xyzString):
     x = float(xyzString[xyzString.find("X(") + 2 : xyzString.find("), Y")])
     y = float(xyzString[xyzString.find("Y(") + 2 : xyzString.find("), Z")])
