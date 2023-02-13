@@ -430,7 +430,7 @@ class Client:
     return not self.stream.closed() if self.stream else False
 
   async def connect(self):
-    print(tornado.version)
+    logger.debug(tornado.version)
     try:
       logger.debug('connecting')
       self.stream = await self.tcpClient.connect(self.host, self.port, timeout=3.0)
