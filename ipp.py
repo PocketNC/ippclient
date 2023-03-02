@@ -190,6 +190,23 @@ class Csy:
 
     return Csy(x,y,z,theta,psi,phi)
 
+  def toJSON(self):
+    return {
+      "isCsy": True,
+      "x": self.x,
+      "y": self.y,
+      "z": self.z,
+      "theta": self.theta,
+      "psi": self.psi,
+      "phi": self.phi
+    }
+
+  def isJSONObjectACsy(data):
+    """Returns True if a dict object has the "isCsy" key. This is used 
+    to automatically convert a deserialized JSON data structure to Csy objects."""
+    return type(data) == dict and data.get("isCsy", False)
+    
+
 def readPointData(data):
   logger.debug("read point data %s" % data)
   x = float(data[data.find("X(") + 2 : data.find("), Y")])
